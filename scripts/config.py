@@ -36,6 +36,11 @@ BASE_CONFIG = {
     "eval_every": 512,
     "seed": 0,
 
+    # --- Early stopping (plateau de l'accuracy EMA, cf. early_stopping.detect_plateau) ---
+    "early_stopping": True,
+    "es_window": 5,
+    "es_slope_threshold": 1e-4,
+
     # --- Optimisations de vitesse (débrayables) ---
     "use_amp": True,
     "cudnn_benchmark": True,

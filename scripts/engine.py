@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader
 
 from config import set_seed
 from data import BatchAugmenter, SSLCollate, build_transforms, infinite_loader, load_datasets
+from early_stopping import detect_plateau
 from ema import EMA
 from evaluate import evaluate
 from models import build_model
@@ -49,6 +50,7 @@ def run_experiment(cfg, algo_module):
     train_step = algo_module.make_train_step(cfg, augmenter, weak_transform, strong_transform, device)
 
     logs = []
+    acc_history = []
     start_time = time.time()
     model.train()
     for k in range(1, cfg["K"] + 1):
@@ -69,6 +71,14 @@ def run_experiment(cfg, algo_module):
                   f"{extra} elapsed={elapsed / 60:.1f}min")
             with open(cfg["log_path"], "w") as f:
                 json.dump({"config": cfg, "logs": logs}, f, indent=2)
+
+            acc_history.append(acc)
+            if cfg["early_stopping"]:
+                is_plateau, slope = detect_plateau(acc_history, cfg["es_window"], cfg["es_slope_threshold"])
+                if is_plateau:
+                    print(f"Plateau détecté (pente={slope:.2e} < seuil={cfg['es_slope_threshold']:.2e}) "
+                          f"-- arrêt anticipé à l'itération {k}.")
+                    break
 
     print("Entraînement terminé.")
     return logs
