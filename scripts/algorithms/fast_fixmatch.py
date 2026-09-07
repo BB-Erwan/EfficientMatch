@@ -18,24 +18,53 @@ def compute_curriculum_batch_size(k, cfg):
 
 
 def estimate_flops_per_iter(model, cfg, device):
-    """Mesure réelle des FLOPs (forward + backward), taille de batch max (mu*B) comme pire cas."""
+    """Mesure réelle des FLOPs, décomposée en un coût FIXE (batch labellisé, taille B constante)
+    et un coût MARGINAL par exemple non labellisé (vue faible sans grad + vue forte avec grad).
+
+    Contrairement aux autres algorithmes, le batch non labellisé de Fast FixMatch (Curriculum Batch
+    Size) a une taille u_t qui croît de `cbs_min_batch` à `mu*B` au cours de l'entraînement (cf.
+    compute_curriculum_batch_size) : les FLOPs par itération ne sont donc PAS constants. Utiliser un
+    flops_per_iter unique multiplié par k (comme pour les autres algos) surestimerait
+    systématiquement les FLOPs cumulés en début de run et fausserait la métrique
+    "FLOPs pour atteindre un seuil de performance", qui est justement l'argument central de CBS
+    (cf. PROJECT_SPEC.md §9.6 -- partie la moins vérifiée du code avant ce correctif).
+
+    Les FLOPs scalent linéairement avec la taille de batch pour un réseau convolutif (chaque exemple
+    supplémentaire coûte le même nombre de FLOPs) : on mesure donc le coût marginal par exemple à la
+    taille de batch max (mu*B) et on le multiplie par u_t réel à chaque itération (cf. flops_for_step).
+    """
     model.train()
     B, muB = cfg["B"], cfg["mu"] * cfg["B"]
+
+    # --- Coût fixe : batch labellisé seul (forward + backward, taille B constante) ---
     dummy_x = torch.randn(B, 3, 32, 32, device=device)
-    dummy_u_w = torch.randn(muB, 3, 32, 32, device=device)
-    dummy_u_s = torch.randn(muB, 3, 32, 32, device=device)
     dummy_labels_x = torch.randint(0, cfg["num_classes"], (B,), device=device)
-    dummy_labels_u = torch.randint(0, cfg["num_classes"], (muB,), device=device)
     model.zero_grad(set_to_none=True)
     with FlopCounterMode(display=False) as flop_counter:
         logits_x = model(dummy_x)
+        F.cross_entropy(logits_x, dummy_labels_x).backward()
+    flops_fixed = flop_counter.get_total_flops()
+    model.zero_grad(set_to_none=True)
+
+    # --- Coût marginal : batch non labellisé à taille max (vue faible sans grad + vue forte avec grad) ---
+    dummy_u_w = torch.randn(muB, 3, 32, 32, device=device)
+    dummy_u_s = torch.randn(muB, 3, 32, 32, device=device)
+    dummy_labels_u = torch.randint(0, cfg["num_classes"], (muB,), device=device)
+    model.zero_grad(set_to_none=True)
+    with FlopCounterMode(display=False) as flop_counter:
         with torch.no_grad():
             _ = model(dummy_u_w)
         logits_u_s = model(dummy_u_s)
-        loss = F.cross_entropy(logits_x, dummy_labels_x) + F.cross_entropy(logits_u_s, dummy_labels_u)
-        loss.backward()
+        F.cross_entropy(logits_u_s, dummy_labels_u).backward()
+    flops_unlabeled_at_max = flop_counter.get_total_flops()
     model.zero_grad(set_to_none=True)
-    return flop_counter.get_total_flops()
+
+    return {"flops_fixed": flops_fixed, "flops_per_unlabeled": flops_unlabeled_at_max / muB}
+
+
+def flops_for_step(flops_measurement, step_metrics):
+    """FLOPs réels de cette itération = coût fixe + coût marginal * taille réelle du batch (u_t)."""
+    return flops_measurement["flops_fixed"] + flops_measurement["flops_per_unlabeled"] * step_metrics["u_t"]
 
 
 def make_train_step(cfg, augmenter, weak_transform, strong_transform, device):

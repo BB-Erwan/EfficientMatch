@@ -5,6 +5,7 @@ chaque algorithme aux fonctions `estimate_flops_per_iter` / `make_train_step` du
 """
 import json
 import time
+from pathlib import Path
 
 import torch
 from torch.utils.data import DataLoader
@@ -42,20 +43,33 @@ def run_experiment(cfg, algo_module):
     )
     scaler = torch.amp.GradScaler(enabled=cfg["use_amp"])
 
-    flops_per_iter = algo_module.estimate_flops_per_iter(model, cfg, device)
-    print(f"FLOPs (mesurés) par itération : {flops_per_iter:.3e}")
-    print(f"FLOPs totaux estimés : {flops_per_iter * cfg['K']:.3e}")
+    # Mesure réelle des FLOPs une seule fois avant la boucle (jamais à chaque itération, cf.
+    # PROJECT_SPEC.md §5). Pour la plupart des algos, `flops_measurement` est un scalaire constant.
+    # Pour Fast FixMatch (Curriculum Batch Size), c'est un dict décomposé en coût fixe + coût
+    # marginal par exemple non labellisé, car la taille réelle du batch varie au cours du run
+    # -- cf. algorithms.fast_fixmatch.flops_for_step.
+    flops_measurement = algo_module.estimate_flops_per_iter(model, cfg, device)
+    flops_at_max = algo_module.flops_for_step(flops_measurement, {"u_t": cfg["mu"] * cfg["B"]})
+    print(f"FLOPs (mesurés) par itération (pire cas) : {flops_at_max:.3e}")
+    print(f"FLOPs totaux estimés (pire cas) : {flops_at_max * cfg['K']:.3e}")
     print(f"Budget total : {cfg['K']} itérations")
 
     train_step = algo_module.make_train_step(cfg, augmenter, weak_transform, strong_transform, device)
 
+    Path(cfg["log_path"]).parent.mkdir(parents=True, exist_ok=True)
+
     logs = []
     acc_history = []
+    cumulative_flops = 0.0
     start_time = time.time()
     model.train()
+    stopped_early = False
+    last_k = 0
     for k in range(1, cfg["K"] + 1):
         cosine_schedule(optimizer, k, cfg["K"])
         step_metrics = train_step(model, ema, optimizer, scaler, k, labeled_iter, unlabeled_iter)
+        cumulative_flops += algo_module.flops_for_step(flops_measurement, step_metrics)
+        last_k = k
 
         if k % cfg["eval_every"] == 0 or k == cfg["K"]:
             ema.copy_to(eval_model)
@@ -63,7 +77,7 @@ def run_experiment(cfg, algo_module):
             elapsed = time.time() - start_time
             log_entry = {
                 "iteration": k, "elapsed_seconds": elapsed,
-                "cumulative_flops": flops_per_iter * k, "eval_accuracy": acc, **step_metrics,
+                "cumulative_flops": cumulative_flops, "eval_accuracy": acc, **step_metrics,
             }
             logs.append(log_entry)
             extra = " ".join(f"{name}={value:.3f}" for name, value in step_metrics.items() if name != "loss")
@@ -78,7 +92,17 @@ def run_experiment(cfg, algo_module):
                 if is_plateau:
                     print(f"Plateau détecté (pente={slope:.2e} < seuil={cfg['es_slope_threshold']:.2e}) "
                           f"-- arrêt anticipé à l'itération {k}.")
+                    stopped_early = True
                     break
+
+    # Marqueur de complétude (distinct d'un run interrompu/crashé en cours de route) : utilisé par
+    # run_priority_experiments.py pour savoir quels runs sauter à la reprise, et par analyze.py pour
+    # savoir jusqu'à quelle itération reporter la dernière valeur EMA (cf. PROJECT_SPEC.md §4).
+    with open(cfg["log_path"], "w") as f:
+        json.dump({
+            "config": cfg, "logs": logs, "status": "completed",
+            "stopped_early": stopped_early, "last_iteration": last_k,
+        }, f, indent=2)
 
     print("Entraînement terminé.")
     return logs

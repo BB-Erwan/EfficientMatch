@@ -44,6 +44,12 @@ def estimate_flops_per_iter(model, cfg, device):
     return flop_counter.get_total_flops()
 
 
+def flops_for_step(flops_measurement, step_metrics):
+    """FLOPs de cette itération -- constant pour EfficientMatch (toutes les tailles de batch,
+    y compris celle du canal Mixup, sont fixes)."""
+    return flops_measurement
+
+
 def make_train_step(cfg, augmenter, weak_transform, strong_transform, device):
     """Comparer à `fixmatch.make_train_step` : Étapes 1-5 et 8-9 identiques ; l'Étape 6 (Mixup
     filtré) est le seul ajout, inséré avant le calcul de la perte totale (Étape 7).

@@ -25,6 +25,11 @@ def estimate_flops_per_iter(model, cfg, device):
     return flop_counter.get_total_flops()
 
 
+def flops_for_step(flops_measurement, step_metrics):
+    """FLOPs de cette itération -- constant pour FlexMatch (batch de taille fixe)."""
+    return flops_measurement
+
+
 def make_train_step(cfg, augmenter, weak_transform, strong_transform, device):
     """Pour basculer vers FixMatch : remplacer le bloc "SEUIL ADAPTATIF" par un seuil fixe
     `cfg['tau']` et supprimer la mise à jour de `class_counts` -- rien d'autre ne change.

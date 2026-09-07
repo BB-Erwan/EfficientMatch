@@ -25,6 +25,11 @@ def estimate_flops_per_iter(model, cfg, device):
     return flop_counter.get_total_flops()
 
 
+def flops_for_step(flops_measurement, step_metrics):
+    """FLOPs de cette itération -- constant pour FixMatch (batch de taille fixe)."""
+    return flops_measurement
+
+
 def make_train_step(cfg, augmenter, weak_transform, strong_transform, device):
     def train_step(model, ema, optimizer, scaler, k, labeled_iter, unlabeled_iter):
         # --- Étape 1 : batch labellisé ---

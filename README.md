@@ -1,7 +1,8 @@
 # EfficientMatch
 
-Étude comparative d'algorithmes d'apprentissage semi-supervisé (SSL) sur CIFAR-10/100, en régime
-faible labellisation (`n_labels` réduit, protocole budget `2**17` itérations). Le dépôt contient
+Étude comparative d'algorithmes d'apprentissage semi-supervisé (SSL) sur CIFAR-10/100 (cœur de
+l'étude) et PathMNIST (MedMNIST v2, perspective hors distribution), en régime faible labellisation
+(`n_labels` réduit, protocole budget `2**17` itérations). Le dépôt contient
 deux façons équivalentes de lancer les mêmes expériences :
 
 - des **notebooks** (`notebooks/`), un par algorithme, pour l'exploration interactive ;
@@ -32,9 +33,11 @@ notebooks/
     fast_fixmatch_experiment.ipynb
     efficientmatch_experiment.ipynb
 scripts/
-    train.py            # point d'entrée CLI
+    train.py            # point d'entrée CLI (un seul run)
+    run_priority_experiments.py  # orchestrateur Phase 2 (ablation lambda_mix) + Phase 3
+    analyze.py          # calcule AUC, itérations/FLOPs jusqu'à seuil (métriques absentes des logs bruts)
     config.py           # config par défaut (commune + spécifique à chaque algo)
-    data.py             # datasets CIFAR SSL + transforms v1/v2
+    data.py             # datasets CIFAR-10/100/PathMNIST SSL + transforms v1/v2
     models.py           # WideResNet
     ema.py              # EMA des poids
     schedule.py         # schedule de learning rate cosine recalé
@@ -70,7 +73,15 @@ pour le détail complet des options et des exemples.
 
 Chaque run (notebook ou CLI) journalise, à intervalles réguliers (`eval_every`), l'accuracy top-1 sur
 le jeu de test (poids EMA), la perte, les taux de masquage des pseudo-étiquettes et les FLOPs cumulés
-(mesurés via `torch.utils.flop_counter.FlopCounterMode`), dans un fichier `logs_<algo>.json`.
+(mesurés une seule fois avant la boucle via `torch.utils.flop_counter.FlopCounterMode`, puis intégrés
+itération par itération -- y compris pour Fast FixMatch, dont la taille de batch varie). Le CLI écrit
+ces logs bruts dans `./logs/<algo>_<dataset>_n<n_labels>_K<K>_seed<seed>[_<tag>].json` ; les notebooks
+utilisent `./logs_<algo>.json`.
+
+Les métriques du papier proprement dites (AUC normalisée sur `[0, K]`, itérations/FLOPs pour atteindre
+un seuil de performance, avec report de la dernière valeur EMA pour les runs arrêtés tôt) ne sont PAS
+calculées pendant l'entraînement : elles sont dérivées après coup des logs bruts par
+[scripts/analyze.py](scripts/analyze.py).
 
 ## Licence
 

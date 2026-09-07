@@ -8,9 +8,11 @@ entièrement configurables.
 
 ```
 scripts/
-    train.py        # point d'entrée CLI
-    config.py        # config par défaut (commune + spécifique à chaque algo)
-    data.py          # datasets CIFAR SSL + transforms v1/v2 (bascule CONFIG["use_transforms_v2"])
+    train.py        # point d'entrée CLI (un seul run)
+    run_priority_experiments.py  # orchestrateur séquentiel Phase 2 (ablation lambda_mix) + Phase 3
+    analyze.py       # post-traitement des logs JSON -> AUC, itérations/FLOPs jusqu'à seuil, forward-fill
+    config.py        # config par défaut (commune + spécifique à chaque algo + par dataset)
+    data.py          # datasets CIFAR-10/100/PathMNIST SSL + transforms v1/v2
     models.py        # WideResNet-28-2
     ema.py           # EMA des poids
     schedule.py      # schedule de learning rate cosine recalé
@@ -24,10 +26,12 @@ scripts/
         efficientmatch.py
 ```
 
-Chaque module de `algorithms/` expose deux fonctions : `estimate_flops_per_iter(model, cfg, device)` et
-`make_train_step(cfg, augmenter, weak_transform, strong_transform, device)`. `engine.py` assemble le
-reste (données, modèle, optimiseur, logging JSON) et appelle ces fonctions -- exactement la logique des
-notebooks, mais atomisée en fichiers indépendants.
+Chaque module de `algorithms/` expose trois fonctions : `estimate_flops_per_iter(model, cfg, device)`,
+`flops_for_step(flops_measurement, step_metrics)` (traduit la mesure en FLOPs réels de l'itération
+courante -- constant pour la plupart des algos, mais dépend de `step_metrics["u_t"]` pour Fast FixMatch
+dont la taille de batch varie au cours du run) et `make_train_step(cfg, augmenter, weak_transform,
+strong_transform, device)`. `engine.py` assemble le reste (données, modèle, optimiseur, logging JSON)
+et appelle ces fonctions -- exactement la logique des notebooks, mais atomisée en fichiers indépendants.
 
 ## Installation
 
@@ -57,7 +61,42 @@ python scripts/train.py --algo fast_fixmatch --debug-subset-size 2000 --K 200 --
 Toutes les clés de `CONFIG` (voir `config.py`) sont exposées en flags `--nom-de-cle` (underscores ->
 tirets). Les booléens utilisent `--flag`/`--no-flag`. Les paramètres spécifiques à un algorithme
 (`alpha_mix`, `K_aug`, `cbs_alpha`, ...) n'apparaissent que lorsque `--algo` correspondant est sélectionné
--- lancez `python scripts/train.py --algo <nom> --help` pour voir la liste complète.
+-- lancez `python scripts/train.py --algo <nom> --help` pour voir la liste complète. `--dataset` bascule
+automatiquement `num_classes`/`weight_decay` selon le dataset (cf. `config.DATASET_DEFAULTS`), sauf si
+vous les surchargez vous-même explicitement.
 
 Chaque run écrit sa configuration + ses logs (perte, accuracy, FLOPs cumulés) dans
-`./logs_<algo>.json`, au même format que les notebooks.
+`./logs/<algo>_<dataset>_n<n_labels>_K<K>_seed<seed>[_<tag>].json` (le `tag` optionnel, via `--tag`,
+sert à distinguer plusieurs runs qui partagent (algo, dataset, n_labels, K, seed) -- ex. l'ablation
+lambda_mix). Le fichier est réécrit à chaque évaluation puis, à la fin du run (budget atteint ou arrêt
+anticipé), marqué `"status": "completed"` -- c'est ce marqueur que `run_priority_experiments.py` utilise
+pour sauter les runs déjà complétés à la reprise.
+
+## Orchestrateur (Phase 2 + Phase 3, PROJECT_SPEC.md §7)
+
+```powershell
+# Aperçu de la file complète sans rien lancer
+python scripts/run_priority_experiments.py --lambda-mix-frozen 1.0 --dry-run
+
+# Phase 2 seule : ablation lambda_mix (EfficientMatch, budget réduit K=2**14, 1 seed, {0.5, 1, 2})
+python scripts/run_priority_experiments.py --skip-phase3
+
+# Phase 3 seule, une fois lambda_mix figé (cf. analyze.py ci-dessous), 3 graines
+python scripts/run_priority_experiments.py --skip-phase2 --lambda-mix-frozen 1.0 --phase3-seeds 0 1 2
+```
+
+Un run déjà présent dans `./logs/` avec `"status": "completed"` est automatiquement sauté -- on peut
+donc interrompre et relancer l'orchestrateur sans dupliquer de travail.
+
+## Analyse des résultats (métriques du papier, absentes des logs bruts)
+
+`train.py`/`engine.py` ne logguent que des points bruts (itération, accuracy, FLOPs cumulés).
+`analyze.py` calcule après coup ce que le papier rapporte réellement (Table 1) : AUC normalisée sur
+`[0, K]`, report de la dernière valeur EMA jusqu'à `K` pour les runs arrêtés tôt (pour que l'AUC reste
+comparable entre méthodes), et itérations/FLOPs pour atteindre une fraction de l'accuracy asymptotique
+d'un algo de référence (FixMatch par défaut).
+
+```powershell
+python scripts/analyze.py --logs-dir ./logs --dataset cifar10 --n-labels 40 --K 131072 \
+    --reference-algo fixmatch --threshold-frac 0.9 --out results_phase3.json
+```
