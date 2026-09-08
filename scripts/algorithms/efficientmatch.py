@@ -1,19 +1,7 @@
 """EfficientMatch -- FixMatch + canal de Mixup filtré par le masque de confiance dur."""
-import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.flop_counter import FlopCounterMode
-
-
-def mixup_pair(x1, p1, x2, p2, alpha):
-    """Mélange convexe entre deux paires (image, distribution de probabilité / label one-hot).
-    lam est forcé >= 0.5 (convention MixMatch/MixUp).
-    """
-    lam = float(np.random.beta(alpha, alpha))
-    lam = max(lam, 1 - lam)
-    x = lam * x1 + (1 - lam) * x2
-    p = lam * p1 + (1 - lam) * p2
-    return x, p
 
 
 def estimate_flops_per_iter(model, cfg, device):
@@ -53,7 +41,26 @@ def flops_for_step(flops_measurement, step_metrics):
 def make_train_step(cfg, augmenter, weak_transform, strong_transform, device):
     """Comparer à `fixmatch.make_train_step` : Étapes 1-5 et 8-9 identiques ; l'Étape 6 (Mixup
     filtré) est le seul ajout, inséré avant le calcul de la perte totale (Étape 7).
+
+    Le canal Mixup (Étape 6) est aligné précisément sur la référence `fixmixmatch-simple.py` (et non
+    sur une formulation MixUp générique à lambda unique par batch) :
+    - lambda PAR ÉCHANTILLON (un tirage Beta distinct par élément, pas un scalaire unique pour tout
+      le batch) -- un tirage pour la partie labellisée, un autre pour la partie non labellisée ;
+    - masque de confiance appliqué via le partenaire mélangé UNIQUEMENT (pas le produit avec le
+      masque de l'ancre elle-même) ;
+    - cible dure (le vrai label) pour la partie labellisée, cible SOFT (distribution softmax
+      complète `probs_u_w`, pas le pseudo-label dur) pour la partie non labellisée ;
+    - normalisation en DEUX moyennes séparées (partie labellisée / partie non labellisée, sommées),
+      pas une moyenne unique sur le nombre de paires confiantes.
+    Le gradient clipping de la référence n'est délibérément PAS repris ici. L'EMA reste celle du
+    dépôt, appliquée à toutes les méthodes (cf. engine.py) -- fixmixmatch-simple.py n'en a pas et
+    évalue le modèle brut.
     """
+    beta_dist = torch.distributions.Beta(
+        torch.tensor(cfg["alpha_mix"], device=device, dtype=torch.float32),
+        torch.tensor(cfg["alpha_mix"], device=device, dtype=torch.float32),
+    )
+
     def train_step(model, ema, optimizer, scaler, k, labeled_iter, unlabeled_iter):
         # --- Étape 1 : batch labellisé ---
         imgs_x_raw, labels_x_int = next(labeled_iter)
@@ -91,8 +98,9 @@ def make_train_step(cfg, augmenter, weak_transform, strong_transform, device):
             loss_u_per_sample = F.cross_entropy(logits_u_s, pseudo_labels, reduction="none")
             loss_u = (loss_u_per_sample * mask).mean()
 
-            # --- Étape 6 : MIXUP FILTRÉ (contribution EfficientMatch) ---
-            mask_x = torch.ones(imgs_x.size(0), device=device)  # masque toujours = 1 pour le batch labellisé
+            # --- Étape 6 : MIXUP FILTRÉ (aligné sur fixmixmatch-simple.py) ---
+            B = imgs_x.size(0)
+            mask_x = torch.ones(B, device=device)
 
             all_imgs = torch.cat([imgs_x, imgs_u_w], dim=0)
             all_labels = torch.cat([labels_x_onehot, pseudo_labels_onehot], dim=0)
@@ -103,15 +111,35 @@ def make_train_step(cfg, augmenter, weak_transform, strong_transform, device):
             all_labels_shuffled = all_labels[perm]
             all_masks_shuffled = all_masks[perm]
 
-            mixed_imgs, mixed_labels = mixup_pair(
-                all_imgs, all_labels, all_imgs_shuffled, all_labels_shuffled, cfg["alpha_mix"]
-            )
-            # masque dur : une paire ne contribue que si SES DEUX composants sont fiables
-            pair_mask = all_masks * all_masks_shuffled
+            # Lambda par échantillon (pas un scalaire par batch), forcé >= 0.5 pour que l'ancre
+            # d'origine (imgs_x / imgs_u_w) domine toujours le mélange.
+            lam_x = beta_dist.sample((B,))
+            lam_u = beta_dist.sample((imgs_u_w.size(0),))
+            lam_x = torch.maximum(lam_x, 1 - lam_x)
+            lam_u = torch.maximum(lam_u, 1 - lam_u)
 
-            logits_mixed = model(mixed_imgs)
-            loss_mix_per_sample = -(mixed_labels * F.log_softmax(logits_mixed, dim=-1)).sum(dim=-1)
-            loss_mix = (loss_mix_per_sample * pair_mask).sum() / (pair_mask.sum() + 1e-8)
+            mixed_x_imgs = torch.lerp(all_imgs_shuffled[:B], imgs_x, lam_x.view(-1, 1, 1, 1))
+            mixed_u_imgs = torch.lerp(all_imgs_shuffled[B:], imgs_u_w, lam_u.view(-1, 1, 1, 1))
+
+            # Cible dure pour la partie labellisée, SOFT (probs_u_w) pour la partie non labellisée.
+            mixed_x_labels = torch.lerp(all_labels_shuffled[:B], labels_x_onehot, lam_x.view(-1, 1))
+            mixed_u_labels = torch.lerp(all_labels_shuffled[B:], probs_u_w, lam_u.view(-1, 1))
+
+            all_mixed_imgs = torch.cat([mixed_x_imgs, mixed_u_imgs], dim=0)
+            logits_mixed = model(all_mixed_imgs)
+            logits_x_mixed = logits_mixed[:B]
+            logits_u_mixed = logits_mixed[B:]
+
+            # Masque du partenaire mélangé uniquement (pas de produit avec le masque de l'ancre).
+            mask_x_shuffled = all_masks_shuffled[:B]
+            mask_u_shuffled = all_masks_shuffled[B:]
+
+            # Deux moyennes séparées (labellisé / non labellisé), sommées -- pas une moyenne unique
+            # sur le nombre de paires confiantes.
+            loss_mix = (
+                (mask_x_shuffled * F.cross_entropy(logits_x_mixed, mixed_x_labels, reduction="none")).mean()
+                + (mask_u_shuffled * F.cross_entropy(logits_u_mixed, mixed_u_labels, reduction="none")).mean()
+            )
 
             # --- Étape 7 : perte totale ---
             loss = loss_s + cfg["lambda_u"] * loss_u + cfg["lambda_mix"] * loss_mix
@@ -125,13 +153,14 @@ def make_train_step(cfg, augmenter, weak_transform, strong_transform, device):
             loss.backward()
             optimizer.step()
 
-        # --- Étape 9 : mise à jour EMA ---
+        # --- Étape 9 : mise à jour EMA (conservée telle quelle -- cf. engine.py, appliquée à toutes
+        # les méthodes du dépôt) ---
         ema.update(model)
 
         return {
             "loss": loss.item(), "loss_s": loss_s.item(), "loss_u": loss_u.item(),
             "loss_mix": loss_mix.item(), "mask_rate": mask.mean().item(),
-            "pair_mask_rate": pair_mask.mean().item(),
+            "mixup_mask_rate": all_masks_shuffled.mean().item(),
         }
 
     return train_step

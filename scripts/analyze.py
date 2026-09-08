@@ -5,11 +5,12 @@ par rapport à l'accuracy asymptotique de FixMatch dans NOTRE protocole (cf. PRO
 PDF §"Critère d'arrêt anticipé").
 
 Usage :
-    python analyze.py --logs-dir ./logs --dataset cifar10 --n-labels 40 --K 131072 \
+    python analyze.py --logs-dir ./logs --dataset cifar10 --n-labels 250 --K 131072 \
         --reference-algo fixmatch --threshold-frac 0.9
 
-    # Inspecter l'ablation lambda_mix (Phase 2, K=2**14, tags lammix0.5/lammix1.0/lammix2.0) :
-    python analyze.py --logs-dir ./logs --dataset cifar10 --n-labels 40 --K 16384
+    # Inspecter l'ablation lambda_mix (Phase 2, K=2**14, tags lammix0.5/lammix1.0/lammix2.0) ou
+    # l'étude de sensibilité à mu (tags mu3/mu5/mu7) -- même mécanisme de regroupement par tag :
+    python analyze.py --logs-dir ./logs --dataset cifar10 --n-labels 250 --K 16384
 """
 import argparse
 import glob
@@ -132,7 +133,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--logs-dir", default="./logs")
     parser.add_argument("--dataset", default="cifar10")
-    parser.add_argument("--n-labels", type=int, default=40)
+    parser.add_argument("--n-labels", type=int, default=250)
     parser.add_argument("--K", type=int, default=2 ** 17)
     parser.add_argument("--reference-algo", default="fixmatch",
                          help="algo dont l'accuracy asymptotique définit le seuil de performance")

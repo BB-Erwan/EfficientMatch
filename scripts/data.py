@@ -10,7 +10,7 @@ import torch
 import torchvision
 import torchvision.transforms as transforms_v1
 import torchvision.transforms.v2 as transforms_v2
-from torch.utils.data import DataLoader, Dataset, Subset
+from torch.utils.data import DataLoader, Dataset, RandomSampler, Subset
 
 # Résolution d'image et normalisation par canal, propres à chaque dataset.
 # CIFAR-10/100 : statistiques standard du protocole FixMatch/FlexMatch.
@@ -174,9 +174,20 @@ def load_datasets(cfg, eval_transform):
 
 
 def infinite_loader(dataset, batch_size, cfg, collate_fn, shuffle=True):
-    """Itérateur infini sur un DataLoader (labellisé/non-labellisé n'ont pas la même taille d'époque)."""
+    """Itérateur infini sur un DataLoader (labellisé/non-labellisé n'ont pas la même taille d'époque).
+
+    Utilise un RandomSampler AVEC REMISE (pratique standard en SSL) plutôt que `shuffle=True` seul :
+    en régime de faible labellisation, le jeu labellisé (n_labels, ex. 40) est plus petit que le batch
+    (B, ex. 64). Avec `shuffle=True` + `drop_last=True`, le sampler par défaut tire exactement
+    len(dataset) indices SANS remise par "époque" -- si len(dataset) < batch_size, aucun batch complet
+    ne peut jamais être formé, et `while True: for batch in loader` boucle indéfiniment sans jamais
+    rien produire (blocage silencieux, sans erreur, quasi 0% CPU/GPU -- observé en debug sur cette
+    machine). L'échantillonnage avec remise cycle sur le jeu labellisé autant de fois que nécessaire,
+    quelle que soit sa taille par rapport à B.
+    """
+    sampler = RandomSampler(dataset, replacement=True, num_samples=batch_size * 100) if shuffle else None
     loader = DataLoader(
-        dataset, batch_size=batch_size, shuffle=shuffle,
+        dataset, batch_size=batch_size, sampler=sampler, shuffle=False if sampler else shuffle,
         num_workers=cfg["num_workers"], pin_memory=cfg["pin_memory"],
         persistent_workers=cfg["persistent_workers"] and cfg["num_workers"] > 0, drop_last=True,
         collate_fn=collate_fn,

@@ -12,6 +12,10 @@ Exemples :
 
     # Aperçu de la file sans rien lancer :
     python run_priority_experiments.py --lambda-mix-frozen 1.0 --dry-run
+
+    # Étude de sensibilité à mu sur EfficientMatch (secondaire/annexe, PAS dans la comparaison
+    # principale -- cf. phase_mu_ablation), en plus ou à la place des Phases 2/3 :
+    python run_priority_experiments.py --skip-phase2 --skip-phase3 --run-mu-ablation
 """
 import argparse
 import json
@@ -78,6 +82,29 @@ def phase2_lambda_mix_ablation(dataset, n_labels, K, seed):
     return runs
 
 
+def phase_mu_ablation(dataset, n_labels, K, seed, mu_values):
+    """Étude de sensibilité à `mu` (taille du batch non labellisé = mu*B) sur EfficientMatch seul,
+    budget réduit, 1 seule graine -- analyse SECONDAIRE motivée par la thèse du papier (efficacité de
+    calcul), pas un remplacement de la comparaison principale.
+
+    `mu=7` fait partie des hyperparamètres partagés du protocole standard (FixMatch/FlexMatch/
+    MixMatch/USB, cf. PROJECT_SPEC.md/Table 2) et n'est PAS changé dans le Tableau 1 (Phase 3) pour
+    garder un protocole équitable entre méthodes -- si `mu` variait uniquement pour EfficientMatch
+    dans la comparaison principale, ce ne serait plus une comparaison à protocole égal. Cette
+    ablation sert uniquement à documenter, en annexe, si un `mu` plus petit offre un meilleur
+    compromis FLOPs/performance pour EfficientMatch spécifiquement (mu plus petit -> batch non
+    labellisé plus petit -> moins de FLOPs par itération sur les branches faible/forte ET sur le
+    canal Mixup).
+    """
+    runs = []
+    for mu in mu_values:
+        runs.append(("efficientmatch", {
+            "dataset": dataset, "n_labels": n_labels, "seed": seed, "K": K,
+            "mu": mu, "tag": f"mu{mu}",
+        }))
+    return runs
+
+
 def phase3_main_comparison(dataset, n_labels, K, seeds, lambda_mix_frozen):
     """PROJECT_SPEC.md §7 Phase 3 : cœur du papier (RQ1+RQ2) -- FixMatch, FlexMatch, MixMatch,
     EfficientMatch (lambda_mix figé par la Phase 2), CIFAR-10, budget de labels principal, K=2**17."""
@@ -95,7 +122,7 @@ def phase3_main_comparison(dataset, n_labels, K, seeds, lambda_mix_frozen):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dataset", default="cifar10")
-    parser.add_argument("--n-labels", type=int, default=40)
+    parser.add_argument("--n-labels", type=int, default=250)
     parser.add_argument("--phase2-K", type=int, default=2 ** 14)
     parser.add_argument("--phase2-seed", type=int, default=0)
     parser.add_argument("--phase3-K", type=int, default=2 ** 17)
@@ -105,12 +132,22 @@ def main():
                               "(python analyze.py --K <phase2-K> ...) -- requis pour lancer la Phase 3")
     parser.add_argument("--skip-phase2", action="store_true")
     parser.add_argument("--skip-phase3", action="store_true")
+    parser.add_argument("--run-mu-ablation", action="store_true",
+                         help="ajoute l'étude de sensibilité à mu (EfficientMatch seul, secondaire/"
+                              "annexe, cf. phase_mu_ablation) à la file -- PAS lancée par défaut")
+    parser.add_argument("--mu-values", type=int, nargs="+", default=[3, 5, 7])
+    parser.add_argument("--mu-ablation-K", type=int, default=2 ** 14)
+    parser.add_argument("--mu-ablation-seed", type=int, default=0)
     parser.add_argument("--dry-run", action="store_true", help="affiche la file sans rien lancer")
     args = parser.parse_args()
 
     queue = []
     if not args.skip_phase2:
         queue += phase2_lambda_mix_ablation(args.dataset, args.n_labels, args.phase2_K, args.phase2_seed)
+    if args.run_mu_ablation:
+        queue += phase_mu_ablation(
+            args.dataset, args.n_labels, args.mu_ablation_K, args.mu_ablation_seed, args.mu_values
+        )
     if not args.skip_phase3:
         if args.lambda_mix_frozen is None:
             print(

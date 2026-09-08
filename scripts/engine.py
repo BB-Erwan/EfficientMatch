@@ -32,7 +32,15 @@ def run_experiment(cfg, algo_module):
     labeled_set, unlabeled_set, test_set = load_datasets(cfg, eval_transform)
     labeled_iter = infinite_loader(labeled_set, cfg["B"], cfg, collate_fn, shuffle=True)
     unlabeled_iter = infinite_loader(unlabeled_set, cfg["mu"] * cfg["B"], cfg, collate_fn, shuffle=True)
-    test_loader = DataLoader(test_set, batch_size=256, shuffle=False, num_workers=cfg["num_workers"])
+    # persistent_workers : sans ça (défaut DataLoader = False), les workers sont détruits à la fin
+    # de chaque évaluation puis recréés de zéro à la suivante (chaque worker réimporte tout
+    # l'environnement Python -- lent sous Windows), provoquant une pause visible à chaque checkpoint
+    # alors que les loaders d'entraînement (infinite_loader) ne l'ont jamais eue.
+    test_loader = DataLoader(
+        test_set, batch_size=256, shuffle=False,
+        num_workers=cfg["num_workers"], pin_memory=cfg["pin_memory"],
+        persistent_workers=cfg["persistent_workers"] and cfg["num_workers"] > 0,
+    )
 
     model = build_model(cfg, device)
     eval_model = build_model(cfg, device)
@@ -48,7 +56,15 @@ def run_experiment(cfg, algo_module):
     # Pour Fast FixMatch (Curriculum Batch Size), c'est un dict décomposé en coût fixe + coût
     # marginal par exemple non labellisé, car la taille réelle du batch varie au cours du run
     # -- cf. algorithms.fast_fixmatch.flops_for_step.
-    flops_measurement = algo_module.estimate_flops_per_iter(model, cfg, device)
+    #
+    # Mesurée sur un modèle NON compilé, jetable : FlopCounterMode intercepte les opérations au
+    # niveau dispatch, et measure `model` directement s'il est déjà compilé fausserait potentiellement
+    # le comptage (Inductor peut fusionner des opérations avant que FlopCounterMode ne les voie) --
+    # signalé par le UserWarning PyTorch "global hooks on modules ... will cause the hooks to fire an
+    # extra time" observé en pratique dès que compile_model=True.
+    flops_probe_model = build_model(dict(cfg, compile_model=False), device)
+    flops_measurement = algo_module.estimate_flops_per_iter(flops_probe_model, cfg, device)
+    del flops_probe_model
     flops_at_max = algo_module.flops_for_step(flops_measurement, {"u_t": cfg["mu"] * cfg["B"]})
     print(f"FLOPs (mesurés) par itération (pire cas) : {flops_at_max:.3e}")
     print(f"FLOPs totaux estimés (pire cas) : {flops_at_max * cfg['K']:.3e}")

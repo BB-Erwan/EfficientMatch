@@ -65,5 +65,22 @@ def build_model(cfg, device):
     if cfg["channels_last"]:
         model = model.to(memory_format=torch.channels_last)
     if cfg["compile_model"]:
-        model = torch.compile(model)
+        try:
+            import triton
+            triton_available = True
+        except ImportError:
+            triton_available = False
+        if triton_available:
+            # PAS mode="reduce-overhead" : ce mode active les CUDA Graphs, qui déclenchent sur
+            # Windows un bug connu de torch._inductor (OverflowError: Python int too large to
+            # convert to C long -- le C `long` Windows est 32 bits, contrairement à Linux) dans le
+            # lanceur CUDA statique. Le mode par défaut (sans CUDA Graphs) compile et tourne
+            # normalement (vérifié sur A4000 + torch 2.8.0+cu129 + triton-windows 3.4.0).
+            model = torch.compile(model)
+            print("torch.compile activé (mode par défaut -- reduce-overhead désactivé, bug Windows connu)")
+        else:
+            # Backend Inductor de torch.compile nécessite triton -- absent (ou mal configuré, cas
+            # fréquent sur Windows), on continue sans compiler plutôt que de risquer un blocage
+            # silencieux à la première compilation (cf. session de debug sur benchmark_speed.py).
+            print("torch.compile demandé (compile_model=True) mais triton indisponible -- modèle non compilé.")
     return model

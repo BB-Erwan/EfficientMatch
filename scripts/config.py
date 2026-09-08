@@ -5,18 +5,39 @@
 `DATASET_DEFAULTS` ajoute les clés qui dépendent du dataset choisi (num_classes, weight_decay --
 cf. papier : weight_decay=5e-4 pour CIFAR-10/PathMNIST, 1e-3 pour CIFAR-100).
 """
+import os
 import random
+
+# Contourne un bug Windows : le cache de compilation triton/inductor écrit par défaut dans
+# %TEMP%\torchinductor_<user>\... ; combiné aux sous-dossiers de hash de triton, ce chemin dépasse
+# souvent la limite de 260 caractères de Windows, provoquant un FileNotFoundError silencieux lors de
+# la toute première compilation (vérifié sur cette machine : nom d'utilisateur long -> déjà tronqué
+# en 8.3 par Windows dans %TEMP%). Un chemin court à la racine du disque système évite le problème.
+# Ne s'applique que sur Windows, et seulement si l'utilisateur n'a pas déjà fixé ces variables lui-même.
+if os.name == "nt":
+    _cache_root = os.path.join(os.environ.get("SystemDrive", "C:") + os.sep, "tc")
+    os.environ.setdefault("TRITON_CACHE_DIR", os.path.join(_cache_root, "triton"))
+    os.environ.setdefault("TORCHINDUCTOR_CACHE_DIR", os.path.join(_cache_root, "inductor"))
+    os.makedirs(os.environ["TRITON_CACHE_DIR"], exist_ok=True)
+    os.makedirs(os.environ["TORCHINDUCTOR_CACHE_DIR"], exist_ok=True)
 
 import numpy as np
 import torch
 
+# Racine du projet (parent de scripts/), calculée depuis l'emplacement de ce fichier -- PAS depuis le
+# répertoire courant. "./data" dépendrait du dossier depuis lequel la commande est lancée (racine du
+# projet vs scripts/ vs ailleurs dans un IDE), et pointerait donc vers un dossier différent -- voire
+# vide -- selon le cwd, provoquant un retéléchargement complet du dataset à chaque fois qu'on ne
+# lance pas exactement depuis le même endroit.
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 BASE_CONFIG = {
     # --- Dataset ---
     "dataset": "cifar10",       # "cifar10" | "cifar100" | "pathmnist"
-    "data_root": "./data",
-    # n_labels=40 : valeur figée pour CIFAR-10 (régime de faible labellisation, cf. PROJECT_SPEC.md
-    # §6/§9.5). À reconfirmer explicitement avant la Phase 3 si un autre budget de labels est retenu.
-    "n_labels": 40,
+    "data_root": os.path.join(_PROJECT_ROOT, "data"),
+    # n_labels=250 : valeur figée pour CIFAR-10 (décidée après le benchmark de Phase 1, cf.
+    # BENCHMARK_RESULTS.md -- remplace le placeholder à 40 de PROJECT_SPEC.md §6/§9.5).
+    "n_labels": 250,
     "num_classes": 10,          # écrasé automatiquement selon `dataset`, cf. DATASET_DEFAULTS
 
     # --- Hyperparamètres standards SSL ---
@@ -61,7 +82,12 @@ BASE_CONFIG = {
     "persistent_workers": True,
     "pin_memory": True,
     "debug_subset_size": None,
-    "compile_model": False,
+    # True par défaut : formes de batch fixes pour 4 des 5 algos, torch.compile amortit son coût de
+    # compilation initial sur les dizaines de milliers d'itérations d'un run complet. Forcé à False
+    # spécifiquement pour fast_fixmatch ci-dessous (cf. ALGO_EXTRA_CONFIG) -- son Curriculum Batch
+    # Size change la taille du batch non labellisé à chaque itération, ce qui déclencherait une
+    # recompilation quasi permanente au lieu d'une accélération.
+    "compile_model": True,
 
     # --- Divers ---
     "device": "cuda" if torch.cuda.is_available() else "cpu",
@@ -76,10 +102,16 @@ ALGO_EXTRA_CONFIG = {
         # travail temporaire -- à remplacer par le résultat de l'ablation {0.5, 1, 2} avant la Phase 3
         # (cf. scripts/run_priority_experiments.py --lambda-mix-frozen).
         "lambda_mix": 1.0,
+        # "lambda_mix": 0.0,
     },
     "fast_fixmatch": {
         "cbs_alpha": 0.7,       # sweet spot rapporté par les auteurs (Table 4 du papier)
         "cbs_min_batch": 8,     # borne basse pour éviter un batch quasi-vide en début d'entraînement
+        # Garde-fou : la taille de batch non labellisé varie à chaque itération (CBS), donc
+        # torch.compile recompilerait en permanence au lieu d'accélérer -- cf. BASE_CONFIG.
+        # Reste explicitement surchargeable (--compile-model / --set compile_model=True) si vous
+        # voulez tester `dynamic=True` vous-même, mais ce n'est plus la valeur par défaut.
+        "compile_model": False,
     },
     "mixmatch": {
         "K_aug": 2,             # nombre d'augmentations faibles moyennées pour le pseudo-étiquetage
