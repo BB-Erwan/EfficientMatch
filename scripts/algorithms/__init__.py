@@ -4,7 +4,7 @@
     make_train_step(cfg, augmenter, weak_transform, strong_transform, device) -> callable
 
 Le callable retourné par `make_train_step` a la signature :
-    train_step(model, ema, optimizer, scaler, k, labeled_iter, unlabeled_iter) -> dict[str, float]
+    train_step(model, optimizer, scaler, k, labeled_iter, unlabeled_iter) -> dict[str, float]
 """
 from . import efficientmatch, fast_fixmatch, fixmatch, flexmatch, mixmatch
 

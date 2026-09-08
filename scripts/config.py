@@ -24,6 +24,10 @@ if os.name == "nt":
 import numpy as np
 import torch
 
+# dtype réel utilisé par torch.autocast(dtype=...) -- cfg ne stocke que la clé string ("float16" |
+# "bfloat16"), jamais l'objet torch.dtype, car cfg est sérialisé en JSON dans les logs.
+AMP_DTYPES = {"float16": torch.float16, "bfloat16": torch.bfloat16}
+
 # Racine du projet (parent de scripts/), calculée depuis l'emplacement de ce fichier -- PAS depuis le
 # répertoire courant. "./data" dépendrait du dossier depuis lequel la commande est lancée (racine du
 # projet vs scripts/ vs ailleurs dans un IDE), et pointerait donc vers un dossier différent -- voire
@@ -49,6 +53,9 @@ BASE_CONFIG = {
     "weight_decay": 5e-4,        # écrasé automatiquement selon `dataset`, cf. DATASET_DEFAULTS
     "tau": 0.95,
     "lambda_u": 1.0,
+    # EMA débrayable : "use_ema": False -> engine.py évalue directement les poids en cours
+    # d'entraînement (pas d'eval_model séparé, pas de copie de state_dict à chaque évaluation).
+    "use_ema": True,
     "ema_decay": 0.999,
 
     # --- Modèle ---
@@ -74,7 +81,16 @@ BASE_CONFIG = {
     "es_slope_threshold": 1e-4,
 
     # --- Optimisations de vitesse (débrayables) ---
+    # Précision des matmuls float32 (torch.set_float32_matmul_precision) : "high" active TF32 sur
+    # Ampere+ (ex. A4000) pour les matmuls hors autocast (poids maîtres, étape d'optimiseur) --
+    # gain de vitesse quasi gratuit, perte de précision négligeable pour ce protocole.
+    # Choix : "highest" (fp32 complet) | "high" (TF32) | "medium".
+    "matmul_precision": "high",
     "use_amp": True,
+    # dtype utilisé sous torch.autocast : "float16" (nécessite le GradScaler, gradients pouvant
+    # sous-flotter) ou "bfloat16" (même plage d'exposant que fp32, pas de sous-flottement -> le
+    # GradScaler est automatiquement désactivé pour ce choix, cf. engine.py/benchmark_speed.py).
+    "amp_dtype": "bfloat16",
     "cudnn_benchmark": True,
     "channels_last": True,
     "use_transforms_v2": True,   # True = torchvision.transforms.v2 (batch vectorisé) / False = v1 classique
@@ -102,7 +118,6 @@ ALGO_EXTRA_CONFIG = {
         # travail temporaire -- à remplacer par le résultat de l'ablation {0.5, 1, 2} avant la Phase 3
         # (cf. scripts/run_priority_experiments.py --lambda-mix-frozen).
         "lambda_mix": 1.0,
-        # "lambda_mix": 0.0,
     },
     "fast_fixmatch": {
         "cbs_alpha": 0.7,       # sweet spot rapporté par les auteurs (Table 4 du papier)

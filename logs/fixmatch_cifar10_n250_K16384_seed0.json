@@ -1,0 +1,363 @@
+{
+  "config": {
+    "dataset": "cifar10",
+    "data_root": "C:\\Users\\bertranh\\Documents\\GitHub\\EfficientMatch\\data",
+    "n_labels": 250,
+    "num_classes": 10,
+    "B": 64,
+    "mu": 7,
+    "lr": 0.03,
+    "momentum": 0.9,
+    "nesterov": true,
+    "weight_decay": 0.0005,
+    "tau": 0.95,
+    "lambda_u": 1.0,
+    "depth": 28,
+    "widen_factor": 2,
+    "K": 16384,
+    "iters_per_epoch": 1024,
+    "eval_every": 512,
+    "seed": 0,
+    "tag": "",
+    "early_stopping": true,
+    "es_window": 5,
+    "es_slope_threshold": 0.0001,
+    "use_amp": true,
+    "cudnn_benchmark": true,
+    "channels_last": true,
+    "use_transforms_v2": true,
+    "num_workers": 4,
+    "persistent_workers": true,
+    "pin_memory": true,
+    "debug_subset_size": null,
+    "compile_model": true,
+    "device": "cuda",
+    "algo": "fixmatch",
+    "log_path": "./logs/fixmatch_cifar10_n250_K16384_seed0.json"
+  },
+  "logs": [
+    {
+      "iteration": 512,
+      "elapsed_seconds": 64.91997241973877,
+      "cumulative_flops": 435251365019648.0,
+      "eval_accuracy": 0.4058,
+      "loss": 0.8888776898384094,
+      "loss_s": 0.0532940998673439,
+      "loss_u": 0.8355835676193237,
+      "mask_rate": 0.3035714328289032
+    },
+    {
+      "iteration": 1024,
+      "elapsed_seconds": 90.75222849845886,
+      "cumulative_flops": 870502730039296.0,
+      "eval_accuracy": 0.4408,
+      "loss": 0.11954528838396072,
+      "loss_s": 0.04808766394853592,
+      "loss_u": 0.0714576244354248,
+      "mask_rate": 0.345982164144516
+    },
+    {
+      "iteration": 1536,
+      "elapsed_seconds": 115.67943024635315,
+      "cumulative_flops": 1305754095058944.0,
+      "eval_accuracy": 0.4843,
+      "loss": 0.30054959654808044,
+      "loss_s": 0.012234805151820183,
+      "loss_u": 0.2883147895336151,
+      "mask_rate": 0.3816964328289032
+    },
+    {
+      "iteration": 2048,
+      "elapsed_seconds": 140.56416010856628,
+      "cumulative_flops": 1741005460078592.0,
+      "eval_accuracy": 0.5256,
+      "loss": 0.11839859932661057,
+      "loss_s": 0.010641923174262047,
+      "loss_u": 0.10775667428970337,
+      "mask_rate": 0.4174107313156128
+    },
+    {
+      "iteration": 2560,
+      "elapsed_seconds": 164.99247193336487,
+      "cumulative_flops": 2176256825098240.0,
+      "eval_accuracy": 0.5417,
+      "loss": 0.49652233719825745,
+      "loss_s": 0.01338254101574421,
+      "loss_u": 0.4831397831439972,
+      "mask_rate": 0.4598214626312256
+    },
+    {
+      "iteration": 3072,
+      "elapsed_seconds": 189.58867502212524,
+      "cumulative_flops": 2611508190117888.0,
+      "eval_accuracy": 0.5579,
+      "loss": 0.03958112746477127,
+      "loss_s": 0.008058330044150352,
+      "loss_u": 0.03152279555797577,
+      "mask_rate": 0.470982164144516
+    },
+    {
+      "iteration": 3584,
+      "elapsed_seconds": 214.24460792541504,
+      "cumulative_flops": 3046759555137536.0,
+      "eval_accuracy": 0.5823,
+      "loss": 0.06319664418697357,
+      "loss_s": 0.04323693364858627,
+      "loss_u": 0.0199597105383873,
+      "mask_rate": 0.4620535969734192
+    },
+    {
+      "iteration": 4096,
+      "elapsed_seconds": 238.98497700691223,
+      "cumulative_flops": 3482010920157184.0,
+      "eval_accuracy": 0.587,
+      "loss": 0.036104705184698105,
+      "loss_s": 0.004020307213068008,
+      "loss_u": 0.032084397971630096,
+      "mask_rate": 0.5401785969734192
+    },
+    {
+      "iteration": 4608,
+      "elapsed_seconds": 263.9563901424408,
+      "cumulative_flops": 3917262285176832.0,
+      "eval_accuracy": 0.6145,
+      "loss": 0.03571835160255432,
+      "loss_s": 0.014331145212054253,
+      "loss_u": 0.021387208253145218,
+      "mask_rate": 0.470982164144516
+    },
+    {
+      "iteration": 5120,
+      "elapsed_seconds": 288.8649089336395,
+      "cumulative_flops": 4352513650196480.0,
+      "eval_accuracy": 0.6169,
+      "loss": 0.12296710163354874,
+      "loss_s": 0.008243434131145477,
+      "loss_u": 0.11472366750240326,
+      "mask_rate": 0.4821428656578064
+    },
+    {
+      "iteration": 5632,
+      "elapsed_seconds": 313.49994230270386,
+      "cumulative_flops": 4787765015216128.0,
+      "eval_accuracy": 0.6529,
+      "loss": 0.12089850008487701,
+      "loss_s": 0.005747431889176369,
+      "loss_u": 0.1151510700583458,
+      "mask_rate": 0.5580357313156128
+    },
+    {
+      "iteration": 6144,
+      "elapsed_seconds": 339.6123836040497,
+      "cumulative_flops": 5223016380235776.0,
+      "eval_accuracy": 0.6648,
+      "loss": 0.09856659173965454,
+      "loss_s": 0.04840058088302612,
+      "loss_u": 0.05016600713133812,
+      "mask_rate": 0.5580357313156128
+    },
+    {
+      "iteration": 6656,
+      "elapsed_seconds": 364.42016339302063,
+      "cumulative_flops": 5658267745255424.0,
+      "eval_accuracy": 0.649,
+      "loss": 0.04370558261871338,
+      "loss_s": 0.01034143753349781,
+      "loss_u": 0.03336414694786072,
+      "mask_rate": 0.5379464626312256
+    },
+    {
+      "iteration": 7168,
+      "elapsed_seconds": 389.4182279109955,
+      "cumulative_flops": 6093519110275072.0,
+      "eval_accuracy": 0.6816,
+      "loss": 0.11915432661771774,
+      "loss_s": 0.0026462823152542114,
+      "loss_u": 0.11650804430246353,
+      "mask_rate": 0.6071428656578064
+    },
+    {
+      "iteration": 7680,
+      "elapsed_seconds": 414.26396012306213,
+      "cumulative_flops": 6528770475294720.0,
+      "eval_accuracy": 0.6835,
+      "loss": 0.07929795235395432,
+      "loss_s": 0.005446821451187134,
+      "loss_u": 0.07385113090276718,
+      "mask_rate": 0.5625
+    },
+    {
+      "iteration": 8192,
+      "elapsed_seconds": 440.15406799316406,
+      "cumulative_flops": 6964021840314368.0,
+      "eval_accuracy": 0.6757,
+      "loss": 0.04466727748513222,
+      "loss_s": 0.015786491334438324,
+      "loss_u": 0.028880786150693893,
+      "mask_rate": 0.625
+    },
+    {
+      "iteration": 8704,
+      "elapsed_seconds": 466.90765047073364,
+      "cumulative_flops": 7399273205334016.0,
+      "eval_accuracy": 0.7133,
+      "loss": 0.23162680864334106,
+      "loss_s": 0.005615854635834694,
+      "loss_u": 0.22601094841957092,
+      "mask_rate": 0.6473214626312256
+    },
+    {
+      "iteration": 9216,
+      "elapsed_seconds": 493.50884771347046,
+      "cumulative_flops": 7834524570353664.0,
+      "eval_accuracy": 0.7217,
+      "loss": 0.15192915499210358,
+      "loss_s": 0.015351785346865654,
+      "loss_u": 0.13657736778259277,
+      "mask_rate": 0.629464328289032
+    },
+    {
+      "iteration": 9728,
+      "elapsed_seconds": 520.1030616760254,
+      "cumulative_flops": 8269775935373312.0,
+      "eval_accuracy": 0.7122,
+      "loss": 0.3522452712059021,
+      "loss_s": 0.0036905761808156967,
+      "loss_u": 0.34855470061302185,
+      "mask_rate": 0.6629464626312256
+    },
+    {
+      "iteration": 10240,
+      "elapsed_seconds": 546.7057185173035,
+      "cumulative_flops": 8705027300392960.0,
+      "eval_accuracy": 0.7166,
+      "loss": 0.04185360670089722,
+      "loss_s": 0.0029869284480810165,
+      "loss_u": 0.03886667639017105,
+      "mask_rate": 0.6272321939468384
+    },
+    {
+      "iteration": 10752,
+      "elapsed_seconds": 573.1267690658569,
+      "cumulative_flops": 9140278665412608.0,
+      "eval_accuracy": 0.7249,
+      "loss": 0.11166016757488251,
+      "loss_s": 0.0014621894806623459,
+      "loss_u": 0.11019797623157501,
+      "mask_rate": 0.6964285969734192
+    },
+    {
+      "iteration": 11264,
+      "elapsed_seconds": 599.2236638069153,
+      "cumulative_flops": 9575530030432256.0,
+      "eval_accuracy": 0.7328,
+      "loss": 0.0628301128745079,
+      "loss_s": 0.002468658611178398,
+      "loss_u": 0.060361456125974655,
+      "mask_rate": 0.7120535969734192
+    },
+    {
+      "iteration": 11776,
+      "elapsed_seconds": 624.2895159721375,
+      "cumulative_flops": 1.0010781395451904e+16,
+      "eval_accuracy": 0.7501,
+      "loss": 0.02486644871532917,
+      "loss_s": 0.0027634743601083755,
+      "loss_u": 0.022102974355220795,
+      "mask_rate": 0.6941964626312256
+    },
+    {
+      "iteration": 12288,
+      "elapsed_seconds": 649.2421629428864,
+      "cumulative_flops": 1.0446032760471552e+16,
+      "eval_accuracy": 0.7662,
+      "loss": 0.14058931171894073,
+      "loss_s": 0.004981761798262596,
+      "loss_u": 0.1356075555086136,
+      "mask_rate": 0.7098214626312256
+    },
+    {
+      "iteration": 12800,
+      "elapsed_seconds": 673.8535153865814,
+      "cumulative_flops": 1.08812841254912e+16,
+      "eval_accuracy": 0.7564,
+      "loss": 0.0520818829536438,
+      "loss_s": 0.0028801467269659042,
+      "loss_u": 0.049201734364032745,
+      "mask_rate": 0.6875000596046448
+    },
+    {
+      "iteration": 13312,
+      "elapsed_seconds": 698.2968294620514,
+      "cumulative_flops": 1.1316535490510848e+16,
+      "eval_accuracy": 0.7702,
+      "loss": 0.10739380121231079,
+      "loss_s": 0.0035642925649881363,
+      "loss_u": 0.1038295105099678,
+      "mask_rate": 0.7142857313156128
+    },
+    {
+      "iteration": 13824,
+      "elapsed_seconds": 722.7500224113464,
+      "cumulative_flops": 1.1751786855530496e+16,
+      "eval_accuracy": 0.7845,
+      "loss": 0.17419444024562836,
+      "loss_s": 0.0022804327309131622,
+      "loss_u": 0.1719140112400055,
+      "mask_rate": 0.7299107313156128
+    },
+    {
+      "iteration": 14336,
+      "elapsed_seconds": 747.2466237545013,
+      "cumulative_flops": 1.2187038220550144e+16,
+      "eval_accuracy": 0.7849,
+      "loss": 0.025223731994628906,
+      "loss_s": 0.00167144276201725,
+      "loss_u": 0.023552289232611656,
+      "mask_rate": 0.7455357313156128
+    },
+    {
+      "iteration": 14848,
+      "elapsed_seconds": 771.8070650100708,
+      "cumulative_flops": 1.2622289585569792e+16,
+      "eval_accuracy": 0.7832,
+      "loss": 0.12452293932437897,
+      "loss_s": 0.0018470771610736847,
+      "loss_u": 0.12267586588859558,
+      "mask_rate": 0.7745535969734192
+    },
+    {
+      "iteration": 15360,
+      "elapsed_seconds": 796.3988885879517,
+      "cumulative_flops": 1.305754095058944e+16,
+      "eval_accuracy": 0.7932,
+      "loss": 0.03390461951494217,
+      "loss_s": 0.0011887233704328537,
+      "loss_u": 0.032715894281864166,
+      "mask_rate": 0.754464328289032
+    },
+    {
+      "iteration": 15872,
+      "elapsed_seconds": 821.0439403057098,
+      "cumulative_flops": 1.3492792315609088e+16,
+      "eval_accuracy": 0.8006,
+      "loss": 0.05714505910873413,
+      "loss_s": 0.0013165641576051712,
+      "loss_u": 0.05582849681377411,
+      "mask_rate": 0.7656250596046448
+    },
+    {
+      "iteration": 16384,
+      "elapsed_seconds": 845.5981864929199,
+      "cumulative_flops": 1.3928043680628736e+16,
+      "eval_accuracy": 0.8021,
+      "loss": 0.07707680016756058,
+      "loss_s": 0.00997105985879898,
+      "loss_u": 0.0671057403087616,
+      "mask_rate": 0.7678571939468384
+    }
+  ],
+  "status": "completed",
+  "stopped_early": false,
+  "last_iteration": 16384
+}

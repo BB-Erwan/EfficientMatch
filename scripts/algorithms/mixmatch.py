@@ -4,6 +4,8 @@ import torch
 import torch.nn.functional as F
 from torch.utils.flop_counter import FlopCounterMode
 
+from config import AMP_DTYPES
+
 
 def sharpen(p, T):
     """Aiguise une distribution de probabilité : p_i^(1/T) / sum_j p_j^(1/T)."""
@@ -56,7 +58,7 @@ def flops_for_step(flops_measurement, step_metrics):
 
 def make_train_step(cfg, augmenter, weak_transform, strong_transform, device):
     """MixMatch n'utilise pas de transform forte -- `strong_transform` est ignoré."""
-    def train_step(model, ema, optimizer, scaler, k, labeled_iter, unlabeled_iter):
+    def train_step(model, optimizer, scaler, k, labeled_iter, unlabeled_iter):
         # --- Étape 1 : batch labellisé (une seule vue faible) ---
         imgs_x_raw, labels_x_int = next(labeled_iter)
         imgs_x = augmenter(weak_transform, imgs_x_raw)
@@ -73,7 +75,7 @@ def make_train_step(cfg, augmenter, weak_transform, strong_transform, device):
 
         optimizer.zero_grad(set_to_none=True)
 
-        with torch.autocast(device_type=cfg["device"], enabled=cfg["use_amp"]):
+        with torch.autocast(device_type=cfg["device"], enabled=cfg["use_amp"], dtype=AMP_DTYPES[cfg["amp_dtype"]]):
             # --- Étape 3 : guessing -- moyenne des K prédictions (sans gradient) ---
             with torch.no_grad():
                 probs_sum = torch.zeros(imgs_u_augs[0].size(0), cfg["num_classes"], device=device)
@@ -121,9 +123,6 @@ def make_train_step(cfg, augmenter, weak_transform, strong_transform, device):
         else:
             loss.backward()
             optimizer.step()
-
-        # --- Étape 9 : mise à jour EMA ---
-        ema.update(model)
 
         return {
             "loss": loss.item(), "loss_x": loss_x.item(), "loss_u": loss_u.item(),

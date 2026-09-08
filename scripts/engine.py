@@ -23,6 +23,7 @@ def run_experiment(cfg, algo_module):
     set_seed(cfg["seed"])
     if cfg["cudnn_benchmark"]:
         torch.backends.cudnn.benchmark = True
+    torch.set_float32_matmul_precision(cfg["matmul_precision"])
     device = torch.device(cfg["device"])
 
     weak_transform, strong_transform, eval_transform = build_transforms(cfg)
@@ -43,13 +44,20 @@ def run_experiment(cfg, algo_module):
     )
 
     model = build_model(cfg, device)
-    eval_model = build_model(cfg, device)
-    ema = EMA(model, cfg["ema_decay"])
+    if cfg["use_ema"]:
+        eval_model = build_model(cfg, device)
+        ema = EMA(model, cfg["ema_decay"])
+    else:
+        eval_model = model
+        ema = None
     optimizer = torch.optim.SGD(
         model.parameters(), lr=cfg["lr"], momentum=cfg["momentum"],
         nesterov=cfg["nesterov"], weight_decay=cfg["weight_decay"],
     )
-    scaler = torch.amp.GradScaler(enabled=cfg["use_amp"])
+    # GradScaler n'a de sens qu'en float16 (plage d'exposant réduite, risque de sous-flottement des
+    # gradients) -- inutile et silencieusement no-op en bfloat16 (même plage d'exposant que fp32),
+    # donc désactivé explicitement dans ce cas plutôt que de le laisser vivre pour rien.
+    scaler = torch.amp.GradScaler(enabled=cfg["use_amp"] and cfg["amp_dtype"] == "float16")
 
     # Mesure réelle des FLOPs une seule fois avant la boucle (jamais à chaque itération, cf.
     # PROJECT_SPEC.md §5). Pour la plupart des algos, `flops_measurement` est un scalaire constant.
@@ -83,12 +91,15 @@ def run_experiment(cfg, algo_module):
     last_k = 0
     for k in range(1, cfg["K"] + 1):
         cosine_schedule(optimizer, k, cfg["K"])
-        step_metrics = train_step(model, ema, optimizer, scaler, k, labeled_iter, unlabeled_iter)
+        step_metrics = train_step(model, optimizer, scaler, k, labeled_iter, unlabeled_iter)
+        if ema is not None:
+            ema.update(model)
         cumulative_flops += algo_module.flops_for_step(flops_measurement, step_metrics)
         last_k = k
 
         if k % cfg["eval_every"] == 0 or k == cfg["K"]:
-            ema.copy_to(eval_model)
+            if ema is not None:
+                ema.copy_to(eval_model)
             acc = evaluate(eval_model, test_loader, device)
             elapsed = time.time() - start_time
             log_entry = {
@@ -113,7 +124,7 @@ def run_experiment(cfg, algo_module):
 
     # Marqueur de complétude (distinct d'un run interrompu/crashé en cours de route) : utilisé par
     # run_priority_experiments.py pour savoir quels runs sauter à la reprise, et par analyze.py pour
-    # savoir jusqu'à quelle itération reporter la dernière valeur EMA (cf. PROJECT_SPEC.md §4).
+    # savoir jusqu'à quelle itération reporter la dernière valeur observée (cf. PROJECT_SPEC.md §4).
     with open(cfg["log_path"], "w") as f:
         json.dump({
             "config": cfg, "logs": logs, "status": "completed",

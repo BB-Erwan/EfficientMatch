@@ -32,6 +32,7 @@ def _setup(algo, cfg, device):
     set_seed(cfg["seed"])
     if cfg["cudnn_benchmark"]:
         torch.backends.cudnn.benchmark = True
+    torch.set_float32_matmul_precision(cfg["matmul_precision"])
 
     print(f"    données (data_root={cfg['data_root']})...", flush=True)
     weak_transform, strong_transform, eval_transform = build_transforms(cfg)
@@ -43,19 +44,24 @@ def _setup(algo, cfg, device):
 
     print("    modèle...", flush=True)
     model = build_model(cfg, device)
-    ema = EMA(model, cfg["ema_decay"])
+    ema = EMA(model, cfg["ema_decay"]) if cfg["use_ema"] else None
     optimizer = torch.optim.SGD(
         model.parameters(), lr=cfg["lr"], momentum=cfg["momentum"],
         nesterov=cfg["nesterov"], weight_decay=cfg["weight_decay"],
     )
-    scaler = torch.amp.GradScaler(enabled=cfg["use_amp"])
+    scaler = torch.amp.GradScaler(enabled=cfg["use_amp"] and cfg["amp_dtype"] == "float16")
     train_step = ALGORITHMS[algo].make_train_step(cfg, augmenter, weak_transform, strong_transform, device)
     return train_step, model, ema, optimizer, scaler, labeled_iter, unlabeled_iter
 
 
 def _run_iters(train_step, model, ema, optimizer, scaler, labeled_iter, unlabeled_iter, k_values, device):
+    # ema.update(model) après chaque itération, comme engine.py : c'est un coût réel par itération
+    # (une passe sur 100+ tenseurs du state_dict), à inclure dans la mesure de vitesse -- sauté si
+    # use_ema=False (cf. _setup, ema vaut alors None).
     for k in k_values:
-        train_step(model, ema, optimizer, scaler, k, labeled_iter, unlabeled_iter)
+        train_step(model, optimizer, scaler, k, labeled_iter, unlabeled_iter)
+        if ema is not None:
+            ema.update(model)
     if device.type == "cuda":
         torch.cuda.synchronize()
 

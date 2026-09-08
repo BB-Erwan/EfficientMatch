@@ -3,6 +3,8 @@ import torch
 import torch.nn.functional as F
 from torch.utils.flop_counter import FlopCounterMode
 
+from config import AMP_DTYPES
+
 
 def estimate_flops_per_iter(model, cfg, device):
     """Mesure réelle des FLOPs (forward + backward) pour une itération FlexMatch."""
@@ -36,7 +38,7 @@ def make_train_step(cfg, augmenter, weak_transform, strong_transform, device):
     """
     class_counts = {c: 0 for c in range(cfg["num_classes"])}  # état persistant entre itérations
 
-    def train_step(model, ema, optimizer, scaler, k, labeled_iter, unlabeled_iter):
+    def train_step(model, optimizer, scaler, k, labeled_iter, unlabeled_iter):
         # --- Étape 1 : batch labellisé ---
         imgs_x_raw, labels_x = next(labeled_iter)
         imgs_x = augmenter(weak_transform, imgs_x_raw)
@@ -54,7 +56,7 @@ def make_train_step(cfg, augmenter, weak_transform, strong_transform, device):
 
         optimizer.zero_grad(set_to_none=True)
 
-        with torch.autocast(device_type=cfg["device"], enabled=cfg["use_amp"]):
+        with torch.autocast(device_type=cfg["device"], enabled=cfg["use_amp"], dtype=AMP_DTYPES[cfg["amp_dtype"]]):
             # --- Étape 3 : perte supervisée ---
             logits_x = model(imgs_x)
             loss_s = F.cross_entropy(logits_x, labels_x)
@@ -100,9 +102,6 @@ def make_train_step(cfg, augmenter, weak_transform, strong_transform, device):
         else:
             loss.backward()
             optimizer.step()
-
-        # --- Étape 9 : mise à jour EMA ---
-        ema.update(model)
 
         return {
             "loss": loss.item(), "loss_s": loss_s.item(), "loss_u": loss_u.item(),

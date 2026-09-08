@@ -18,6 +18,8 @@ Usage :
     python scripts/efficientmatch_debug.py --no-grad-clip   # tester l'hypothèse "instabilité sans clipping"
 """
 import argparse
+import os
+import os
 import random
 import time
 
@@ -174,6 +176,9 @@ def main():
     np.random.seed(args.seed)
 
     # --- Données : CIFAR-10, split labellisé/non labellisé équilibré par classe ---
+    # check if the CIFAR-10 dataset has already been downloaded to avoid redundant downloads
+    if not os.path.exists("./data"):
+        os.makedirs("./data")
     train_ds_raw = torchvision.datasets.CIFAR10(root="./data", train=True, download=True)
     test_ds_raw = torchvision.datasets.CIFAR10(root="./data", train=False, download=True)
     print(f"Training samples: {len(train_ds_raw)}, Test samples: {len(test_ds_raw)}")
