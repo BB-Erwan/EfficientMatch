@@ -1,89 +1,66 @@
 # EfficientMatch
 
-Étude comparative d'algorithmes d'apprentissage semi-supervisé (SSL) sur CIFAR-10/100 (cœur de
-l'étude) et PathMNIST (MedMNIST v2, perspective hors distribution), en régime faible labellisation
-(`n_labels` réduit, protocole budget `2**17` itérations). Le dépôt contient
-deux façons équivalentes de lancer les mêmes expériences :
-
-- des **notebooks** (`notebooks/`), un par algorithme, pour l'exploration interactive ;
-- un **framework en ligne de commande** (`scripts/`), qui atomise la même logique en modules `.py`
-  pour lancer des runs longs/reproductibles avec tous les hyperparamètres configurables.
+Étude comparative d'algorithmes d'apprentissage semi-supervisé (SSL) sur CIFAR-10, en régime faible
+labellisation (`n_labels` réduit). Chaque algorithme est un **script autonome** dans `scripts/` :
+augmentations, hyperparamètres et boucle d'entraînement vivent tous dans le même fichier (rien n'est
+factorisé entre algorithmes sauf ce qui est strictement identique quel que soit l'algorithme --
+architecture du modèle, EMA, évaluation).
 
 ## Algorithmes implémentés
 
-| Algorithme | Notebook | Référence | Idée clé |
+| Algorithme | Script | Référence | Idée clé |
 |---|---|---|---|
-| FixMatch | [notebooks/fixmatch_experiment.ipynb](notebooks/fixmatch_experiment.ipynb) | Sohn et al., 2020 | Baseline : perte supervisée + cohérence faible/forte filtrée par un seuil de confiance fixe (`tau`). |
-| FlexMatch | [notebooks/flexmatch_experiment.ipynb](notebooks/flexmatch_experiment.ipynb) | Zhang et al., 2021 | FixMatch + seuillage **adaptatif par classe** (Curriculum Pseudo Labeling), pour corriger le biais envers les classes "faciles". |
-| MixMatch | [notebooks/mixmatch_experiment.ipynb](notebooks/mixmatch_experiment.ipynb) | Berthelot et al., 2019 | Pas d'augmentation forte : guessing par moyenne de K augmentations faibles + sharpening + MixUp entre labellisé et non labellisé. |
-| Fast FixMatch | [notebooks/fast_fixmatch_experiment.ipynb](notebooks/fast_fixmatch_experiment.ipynb) | Chen, Dun & Kyrillidis, 2023/2024 | FixMatch + **Curriculum Batch Size** : la taille du batch non labellisé croît progressivement au cours de l'entraînement pour accélérer le début du training. |
-| EfficientMatch | [notebooks/efficientmatch_experiment.ipynb](notebooks/efficientmatch_experiment.ipynb) | (contribution de ce dépôt) | FixMatch + canal de **Mixup filtré** par le masque de confiance dur, entre le batch labellisé et le batch non labellisé faiblement augmenté. |
+| FixMatch | [scripts/fixmatch.py](scripts/fixmatch.py) | Sohn et al., 2020 | Baseline : perte supervisée + cohérence faible/forte filtrée par un seuil de confiance fixe (`tau`). |
+| FlexMatch | [scripts/flexmatch.py](scripts/flexmatch.py) | Zhang et al., 2021 | FixMatch + seuillage **adaptatif par classe** (Curriculum Pseudo Labeling), pour corriger le biais envers les classes "faciles". |
+| MixMatch | [scripts/mixmatch.py](scripts/mixmatch.py) | Berthelot et al., 2019 | Pas d'augmentation forte : guessing par moyenne de K augmentations faibles + sharpening + Mixup entre labellisé et non labellisé. |
+| EfficientMatch | [scripts/efficientmatch.py](scripts/efficientmatch.py) | (contribution de ce dépôt) | FixMatch + canal de **Mixup filtré** par le masque de confiance dur, entre le batch labellisé et le batch non labellisé faiblement augmenté. |
 
-Les 5 notebooks partagent une structure strictement identique (imports, config, données, modèle
-WideResNet, EMA/FLOPs, assemblage) : seule la section 6 (`train_step_<algo>`) diffère, pour isoler
-précisément l'effet de chaque contribution algorithmique sur les résultats.
+D'autres algorithmes pourront être ajoutés plus tard, chacun comme un nouveau script autonome du
+même type.
 
 ## Structure du dépôt
 
 ```
-notebooks/
-    fixmatch_experiment.ipynb
-    flexmatch_experiment.ipynb
-    mixmatch_experiment.ipynb
-    fast_fixmatch_experiment.ipynb
-    efficientmatch_experiment.ipynb
 scripts/
-    train.py            # point d'entrée CLI (un seul run)
-    run_priority_experiments.py  # orchestrateur Phase 2 (ablation lambda_mix) + Phase 3
-    analyze.py          # calcule AUC, itérations/FLOPs jusqu'à seuil (métriques absentes des logs bruts)
-    config.py           # config par défaut (commune + spécifique à chaque algo)
-    data.py             # datasets CIFAR-10/100/PathMNIST SSL + transforms v1/v2
-    models.py           # WideResNet
-    ema.py              # EMA des poids
-    schedule.py         # schedule de learning rate cosine recalé
-    evaluate.py         # évaluation top-1
-    engine.py           # boucle d'entraînement générique (partagée par tous les algos)
-    algorithms/         # train_step_<algo> + calcul des FLOPs, un module par algorithme
+    fixmatch.py      # script autonome : python fixmatch.py [options]
+    flexmatch.py     # script autonome : python flexmatch.py [options]
+    mixmatch.py      # script autonome : python mixmatch.py [options]
+    efficientmatch.py  # script autonome : python efficientmatch.py [options]
+    analyze.py       # calcule AUC, itérations jusqu'à seuil (métriques absentes des logs bruts)
+    models.py        # WideResNet (partagé)
+    ema.py           # EMA des poids (partagée)
+    evaluate.py      # évaluation top-1 (partagée)
+    data.py          # chargement CIFAR-10 + split + wrapping de dataset (partagé, aucune
+                      # augmentation ni composition de vues -- cf. chaque script)
     requirements.txt
-    README.md           # détails d'utilisation du framework CLI
+    README.md        # détails d'utilisation, options CLI complètes
 ```
 
 ## Utilisation
 
-### Notebooks
-
-Ouvrir le notebook de l'algorithme voulu dans `notebooks/` et exécuter les cellules dans l'ordre ;
-chaque notebook télécharge CIFAR-10/100 dans `./data` et écrit ses logs dans `./logs_<algo>.json`.
-
-### Ligne de commande
-
 ```powershell
 pip install -r scripts/requirements.txt
 
-python scripts/train.py --algo fixmatch
-python scripts/train.py --algo efficientmatch --n-labels 250 --K 65536 --no-use-amp
-python scripts/train.py --algo mixmatch --set weight_decay=1e-3 --set rampup_length=8000
+python scripts/fixmatch.py
+python scripts/flexmatch.py --n-labels 250
+python scripts/mixmatch.py --alpha-mix 0.5 --K 65536
+python scripts/efficientmatch.py --lambda-mix 0.5
 ```
 
-Tous les hyperparamètres (dataset, budget d'entraînement, optimisations de vitesse, hyperparamètres
-propres à chaque algorithme...) sont exposés en flags CLI. Voir [scripts/README.md](scripts/README.md)
-pour le détail complet des options et des exemples.
+Tous les hyperparamètres sont exposés en flags CLI, propres à chaque script (`--help` pour la liste
+complète). Voir [scripts/README.md](scripts/README.md) pour le détail des options et des exemples.
 
 ## Métriques suivies
 
-Chaque run (notebook ou CLI) journalise, à intervalles réguliers (`eval_every`), l'accuracy top-1 sur
-le jeu de test (poids EMA), la perte, les taux de masquage des pseudo-étiquettes et les FLOPs cumulés
-(mesurés une seule fois avant la boucle via `torch.utils.flop_counter.FlopCounterMode`, puis intégrés
-itération par itération -- y compris pour Fast FixMatch, dont la taille de batch varie). Le CLI écrit
-ces logs bruts dans `./logs/<algo>_<dataset>_n<n_labels>_K<K>_seed<seed>[_<tag>].json` ; les notebooks
-utilisent `./logs_<algo>.json`.
+Chaque run journalise, à intervalles réguliers (`--eval-every`), l'accuracy top-1 sur le jeu de test
+(poids EMA) et la perte, dans `./logs/<algo>_cifar10_n<n_labels>_K<K>_seed<seed>[_<tag>].json` -- un
+format commun à tous les scripts.
 
-Les métriques du papier proprement dites (AUC normalisée sur `[0, K]`, itérations/FLOPs pour atteindre
-un seuil de performance, avec report de la dernière valeur EMA pour les runs arrêtés tôt) ne sont PAS
+Les métriques du papier proprement dites (AUC normalisée sur `[0, K]`, itérations pour atteindre un
+seuil de performance, avec report de la dernière valeur pour les runs incomplets) ne sont PAS
 calculées pendant l'entraînement : elles sont dérivées après coup des logs bruts par
 [scripts/analyze.py](scripts/analyze.py).
 
 ## Licence
 
 [MIT](LICENSE)
-

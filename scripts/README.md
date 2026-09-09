@@ -1,29 +1,26 @@
 # Scripts CLI -- EfficientMatch
 
-Framework `.py` (hors notebooks) qui atomise les étapes des notebooks `notebooks/*.ipynb` en modules
-réutilisables, pour lancer les mêmes expériences SSL en ligne de commande avec des hyperparamètres
-entièrement configurables. Pour l'instant, seul FixMatch est implémenté.
+Chaque algorithme SSL est un script Python **autonome** : augmentations, split labellisé/non
+labellisé, hyperparamètres (son propre `argparse`) et boucle d'entraînement vivent tous dans le même
+fichier. FixMatch, FlexMatch, MixMatch et EfficientMatch sont implémentés pour l'instant. Rien n'est
+partagé entre algorithmes sauf ce qui est strictement identique quel que soit l'algorithme
+(architecture du modèle, EMA, évaluation, mécanique générique de chargement de données).
 
 ## Structure
 
 ```
 scripts/
-    train.py        # point d'entrée CLI (un seul run)
+    fixmatch.py      # script autonome : python fixmatch.py [options]
+    flexmatch.py     # script autonome : python flexmatch.py [options]
+    mixmatch.py      # script autonome : python mixmatch.py [options]
+    efficientmatch.py  # script autonome : python efficientmatch.py [options]
     analyze.py       # post-traitement des logs JSON -> AUC, itérations jusqu'à seuil, forward-fill
-    config.py        # config par défaut (commune + spécifique à chaque algo + par dataset)
-    data.py          # datasets CIFAR-10/100/PathMNIST SSL + transforms
-    models.py        # WideResNet-28-2
-    ema.py           # EMA des poids
-    schedule.py      # schedule de learning rate cosine recalé
-    evaluate.py       # évaluation top-1
-    engine.py        # boucle d'entraînement générique
-    algorithms/
-        fixmatch.py
+    models.py        # WideResNet-28-2 (architecture seule, partagée)
+    ema.py           # EMA des poids (partagée)
+    evaluate.py      # évaluation top-1 (partagée)
+    data.py          # chargement CIFAR-10 + split + wrapping de dataset (mécanique générique,
+                      # partagée -- AUCUNE augmentation ni composition de vues ici, cf. chaque script)
 ```
-
-Chaque module de `algorithms/` expose `make_train_step(cfg, device)`. `engine.py` assemble le reste
-(données, modèle, optimiseur, logging JSON) et appelle cette fonction -- exactement la logique des
-notebooks, mais atomisée en fichiers indépendants.
 
 ## Installation
 
@@ -34,36 +31,41 @@ pip install -r scripts/requirements.txt
 ## Utilisation
 
 ```powershell
-# Lancer FixMatch avec les hyperparamètres par défaut (identiques au notebook)
-python scripts/train.py --algo fixmatch
+# FixMatch avec les hyperparamètres par défaut
+python scripts/fixmatch.py
 
-# Changer des hyperparamètres exposés explicitement (n'importe quelle clé de CONFIG)
-python scripts/train.py --algo fixmatch --n-labels 250 --K 65536 --tau 0.9
+# Changer des hyperparamètres (voir --help pour la liste complète, propre à chaque algo)
+python scripts/fixmatch.py --n-labels 250 --K 65536 --tau 0.9
 
-# Surcharger un paramètre non exposé explicitement (répétable), valeur interprétée via ast.literal_eval
-python scripts/train.py --algo fixmatch --set weight_decay=1e-3
+# FlexMatch (seuil de confiance ADAPTATIF par classe -- Curriculum Pseudo Labeling)
+python scripts/flexmatch.py --n-labels 250
+
+# MixMatch (pas de seuil de confiance -- Mixup + moyenne/sharpening de K_aug vues faibles)
+python scripts/mixmatch.py --alpha-mix 0.5
+
+# EfficientMatch (FixMatch + canal de Mixup filtré par le masque de confiance dur)
+python scripts/efficientmatch.py --lambda-mix 0.5
+
+# --verbose affiche une ligne à chaque itération (loss, it/s) pour suivre la vitesse en direct,
+# sans déclencher d'évaluation supplémentaire
+python scripts/fixmatch.py --verbose
 
 # Sous-ensemble de debug pour vérifier rapidement le pipeline
-python scripts/train.py --algo fixmatch --debug-subset-size 2000 --K 200 --eval-every 50
+python scripts/fixmatch.py --debug-subset-size 2000 --K 200 --eval-every 50
 ```
 
-Toutes les clés de `CONFIG` (voir `config.py`) sont exposées en flags `--nom-de-cle` (underscores ->
-tirets). Les booléens utilisent `--flag`/`--no-flag`. `--dataset` bascule automatiquement
-`num_classes`/`weight_decay` selon le dataset (cf. `config.DATASET_DEFAULTS`), sauf si vous les
-surchargez vous-même explicitement.
-
 Chaque run écrit sa configuration + ses logs (perte, accuracy) dans
-`./logs/<algo>_<dataset>_n<n_labels>_K<K>_seed<seed>[_<tag>].json` (le `tag` optionnel, via `--tag`,
-sert à distinguer plusieurs runs qui partagent (algo, dataset, n_labels, K, seed)). Le fichier est
-réécrit à chaque évaluation puis, à la fin du run (budget atteint ou arrêt anticipé), marqué
-`"status": "completed"`.
+`./logs/<algo>_cifar10_n<n_labels>_K<K>_seed<seed>[_<tag>].json` (le `tag` optionnel, via `--tag`,
+sert à distinguer plusieurs runs qui partagent (algo, n_labels, K, seed)). Le fichier est réécrit à
+chaque évaluation puis, à la fin du run, marqué `"status": "completed"` -- ce format est commun à
+tous les scripts, c'est ce qui permet à `analyze.py` de comparer les algorithmes entre eux malgré des
+boucles d'entraînement complètement indépendantes.
 
 ## Analyse des résultats (métriques du papier, absentes des logs bruts)
 
-`train.py`/`engine.py` ne logguent que des points bruts (itération, accuracy). `analyze.py` calcule
-après coup : AUC normalisée sur `[0, K]`, report de la dernière valeur EMA jusqu'à `K` pour les runs
-arrêtés tôt (pour que l'AUC reste comparable entre méthodes), et itérations pour atteindre une
-fraction de l'accuracy asymptotique d'un algo de référence (FixMatch par défaut).
+`analyze.py` calcule après coup : AUC normalisée sur `[0, K]`, report de la dernière valeur EMA
+jusqu'à `K` pour les runs incomplets (pour que l'AUC reste comparable entre méthodes), et itérations
+pour atteindre une fraction de l'accuracy asymptotique d'un algo de référence (FixMatch par défaut).
 
 ```powershell
 python scripts/analyze.py --logs-dir ./logs --dataset cifar10 --n-labels 250 --K 131072 \

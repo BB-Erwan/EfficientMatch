@@ -1,4 +1,3 @@
 torch>=2.1
 torchvision>=0.16
 numpy>=1.24
-medmnist>=3.0   # dataset "pathmnist" uniquement (RQ3, cf. data.py::_load_pathmnist)

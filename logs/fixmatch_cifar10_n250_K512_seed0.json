@@ -1,0 +1,48 @@
+{
+  "config": {
+    "dataset": "cifar10",
+    "data_root": "C:\\Users\\erwan.bertrand\\Documents\\GitHub\\EfficientMatch\\data",
+    "n_labels": 250,
+    "num_classes": 10,
+    "B": 64,
+    "mu": 7,
+    "lr": 0.03,
+    "momentum": 0.9,
+    "nesterov": true,
+    "weight_decay": 0.0005,
+    "tau": 0.95,
+    "lambda_u": 1.0,
+    "use_ema": true,
+    "ema_decay": 0.999,
+    "depth": 28,
+    "widen_factor": 2,
+    "K": 512,
+    "iters_per_epoch": 1024,
+    "eval_every": 512,
+    "seed": 0,
+    "tag": "",
+    "early_stopping": true,
+    "es_window": 5,
+    "es_slope_threshold": 0.0001,
+    "num_workers": 2,
+    "debug_subset_size": null,
+    "device": "cuda",
+    "verbose": true,
+    "algo": "fixmatch",
+    "log_path": "./logs/fixmatch_cifar10_n250_K512_seed0.json"
+  },
+  "logs": [
+    {
+      "iteration": 512,
+      "elapsed_seconds": 386.0893244743347,
+      "eval_accuracy": 0.1043,
+      "loss": 0.31003689765930176,
+      "loss_s": 0.06086196005344391,
+      "loss_u": 0.24917492270469666,
+      "mask_rate": 0.15250070478032285
+    }
+  ],
+  "status": "completed",
+  "stopped_early": false,
+  "last_iteration": 512
+}

@@ -1,0 +1,44 @@
+{
+  "config": {
+    "n_labels": 250,
+    "B": 64,
+    "mu": 1,
+    "lr": 0.03,
+    "momentum": 0.9,
+    "nesterov": true,
+    "weight_decay": 0.0005,
+    "K_aug": 2,
+    "sharpen_T": 0.5,
+    "alpha_mix": 0.75,
+    "lambda_u_max": 75.0,
+    "rampup_length": 16384,
+    "use_ema": false,
+    "ema_decay": 0.999,
+    "depth": 28,
+    "widen_factor": 2,
+    "K": 512,
+    "eval_every": 512,
+    "seed": 0,
+    "tag": "",
+    "num_workers": 2,
+    "debug_subset_size": null,
+    "verbose": true,
+    "data_root": "C:\\Users\\erwan.bertrand\\Documents\\GitHub\\EfficientMatch\\data",
+    "algo": "mixmatch",
+    "dataset": "cifar10",
+    "num_classes": 10
+  },
+  "logs": [
+    {
+      "iteration": 512,
+      "elapsed_seconds": 188.0376136302948,
+      "eval_accuracy": 0.4689,
+      "loss": 0.9870930314064026,
+      "loss_s": 0.9598421454429626,
+      "loss_u": 0.011627040803432465,
+      "lambda_u": 2.34375
+    }
+  ],
+  "status": "completed",
+  "last_iteration": 512
+}

@@ -1,8 +1,8 @@
-"""Post-traitement des logs JSON produits par train.py : calcule les métriques du papier (Table 1)
-qui ne sont PAS calculées pendant l'entraînement -- AUC normalisée sur [0, K], report de dernière
-valeur EMA pour les runs arrêtés tôt, itérations pour atteindre un seuil de performance défini par
-rapport à l'accuracy asymptotique de FixMatch dans NOTRE protocole (cf. PROJECT_SPEC.md §4,
-PDF §"Critère d'arrêt anticipé").
+"""Post-traitement des logs JSON produits par fixmatch.py/mixmatch.py : calcule les métriques du
+papier (Table 1) qui ne sont PAS calculées pendant l'entraînement -- AUC normalisée sur [0, K],
+report de dernière valeur EMA pour les runs incomplets, itérations pour atteindre un seuil de
+performance défini par rapport à l'accuracy asymptotique de FixMatch dans NOTRE protocole
+(cf. PROJECT_SPEC.md §4).
 
 Usage :
     python analyze.py --logs-dir ./logs --dataset cifar10 --n-labels 250 --K 131072 \
@@ -47,8 +47,7 @@ def curve_from_logs(run):
 
 def forward_fill_to_K(iterations, accuracies, K):
     """Complète la courbe jusqu'à K par report de la dernière accuracy EMA observée -- pour que l'AUC
-    reste calculable et comparable entre méthodes arrêtées à des itérations différentes
-    (cf. papier, §"Critère d'arrêt anticipé")."""
+    reste calculable même pour un run incomplet (log tronqué avant K)."""
     if len(iterations) == 0 or iterations[-1] >= K:
         return iterations, accuracies
     return np.append(iterations, K), np.append(accuracies, accuracies[-1])
@@ -83,8 +82,7 @@ def summarize_single_run(path, K, threshold=None):
     iters_thr = iters_to_threshold(iterations, accuracies, threshold) if threshold is not None else None
     return {
         "path": str(path), "seed": cfg["seed"], "auc": auc, "final_accuracy": final_acc,
-        "iters_to_threshold": iters_thr,
-        "stopped_early": run.get("stopped_early", False), "last_iteration": run.get("last_iteration"),
+        "iters_to_threshold": iters_thr, "last_iteration": run.get("last_iteration"),
     }
 
 
@@ -162,7 +160,6 @@ def main():
             "auc": mean_std([s["auc"] for s in summaries]),
             "final_accuracy": mean_std([s["final_accuracy"] for s in summaries]),
             "iters_to_threshold": mean_std([s["iters_to_threshold"] for s in summaries]),
-            "n_stopped_early": sum(1 for s in summaries if s["stopped_early"]),
         }
 
     header = f"{'Méthode':<20}{'AUC':>18}{'Acc. finale':>18}{'Itérations':>20}{'n':>4}"

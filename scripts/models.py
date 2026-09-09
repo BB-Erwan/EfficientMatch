@@ -56,8 +56,3 @@ class WideResNet(nn.Module):
         out = self.relu(self.bn1(out))
         out = F.adaptive_avg_pool2d(out, 1).flatten(1)
         return self.fc(out)
-
-
-def build_model(cfg, device):
-    model = WideResNet(num_classes=cfg["num_classes"], depth=cfg["depth"], widen_factor=cfg["widen_factor"])
-    return model.to(device)
