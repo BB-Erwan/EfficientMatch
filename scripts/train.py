@@ -1,9 +1,9 @@
-"""CLI d'entraînement pour les expériences SSL (FixMatch, FlexMatch, MixMatch, Fast FixMatch, EfficientMatch).
+"""CLI d'entraînement pour FixMatch.
 
 Exemples :
     python train.py --algo fixmatch
-    python train.py --algo efficientmatch --n-labels 250 --K 65536 --no-use-amp
-    python train.py --algo mixmatch --set weight_decay=1e-3 --set rampup_length=8000
+    python train.py --algo fixmatch --n-labels 250 --K 65536 --tau 0.9
+    python train.py --algo fixmatch --set weight_decay=1e-3
 """
 import argparse
 import ast

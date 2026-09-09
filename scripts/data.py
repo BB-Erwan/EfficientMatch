@@ -1,19 +1,13 @@
-"""Chargement des données CIFAR-10/100/PathMNIST et augmentations pour l'entraînement semi-supervisé.
-
-Bascule transparente entre torchvision.transforms (v1, image par image) et
-torchvision.transforms.v2 (batch vectorisé) via cfg["use_transforms_v2"].
-"""
+"""Chargement des données CIFAR-10/100/PathMNIST et augmentations pour l'entraînement semi-supervisé."""
 from pathlib import Path
 
 import numpy as np
-import torch
 import torchvision
-import torchvision.transforms as transforms_v1
-import torchvision.transforms.v2 as transforms_v2
+import torchvision.transforms as transforms
 from torch.utils.data import DataLoader, Dataset, RandomSampler, Subset
 
 # Résolution d'image et normalisation par canal, propres à chaque dataset.
-# CIFAR-10/100 : statistiques standard du protocole FixMatch/FlexMatch.
+# CIFAR-10/100 : statistiques standard du protocole FixMatch.
 # PathMNIST : images natives 28x28 (medmnist ne fournit pas de variante 32x32 dans toutes les
 # versions du package) ; normalisation (0.5, 0.5, 0.5) = convention utilisée dans le code officiel
 # MedMNIST (https://github.com/MedMNIST/MedMNIST), pas une statistique recalculée ici.
@@ -25,87 +19,25 @@ DATASET_META = {
 
 
 def build_transforms(cfg):
-    """Retourne (weak_transform, strong_transform, eval_transform) selon cfg["use_transforms_v2"]
-    et les statistiques (taille, moyenne, écart-type) du dataset choisi (cf. DATASET_META)."""
+    """Retourne (weak_transform, strong_transform, eval_transform) selon les statistiques
+    (taille, moyenne, écart-type) du dataset choisi (cf. DATASET_META)."""
     if cfg["dataset"] not in DATASET_META:
         raise ValueError(f"Dataset inconnu : {cfg['dataset']} (choix : {sorted(DATASET_META)})")
     meta = DATASET_META[cfg["dataset"]]
     size, mean, std = meta["image_size"], meta["mean"], meta["std"]
 
-    use_v2 = cfg["use_transforms_v2"]
-    T = transforms_v2 if use_v2 else transforms_v1
-
-    if use_v2:
-        # v2 : un seul appel vectorisé sur tout le batch (CPU ou GPU), plus de boucle Python par image
-        weak_transform = T.Compose([
-            T.RandomHorizontalFlip(), T.RandomCrop(size, padding=4, padding_mode="reflect"),
-            T.ToDtype(torch.float32, scale=True), T.Normalize(mean, std),
-        ])
-        strong_transform = T.Compose([
-            T.RandomHorizontalFlip(), T.RandomCrop(size, padding=4, padding_mode="reflect"),
-            T.RandAugment(num_ops=2, magnitude=10),
-            T.ToDtype(torch.float32, scale=True), T.Normalize(mean, std), T.RandomErasing(p=0.5),
-        ])
-        eval_transform = T.Compose([
-            T.PILToTensor(), T.ToDtype(torch.float32, scale=True), T.Normalize(mean, std),
-        ])
-    else:
-        # v1 (classique) : transform appliqué image par image (boucle Python) dans la boucle d'entraînement
-        weak_transform = T.Compose([
-            T.RandomHorizontalFlip(), T.RandomCrop(size, padding=4, padding_mode="reflect"),
-            T.ToTensor(), T.Normalize(mean, std),
-        ])
-        strong_transform = T.Compose([
-            T.RandomHorizontalFlip(), T.RandomCrop(size, padding=4, padding_mode="reflect"),
-            T.RandAugment(num_ops=2, magnitude=10),
-            T.ToTensor(), T.Normalize(mean, std), T.RandomErasing(p=0.5),
-        ])
-        eval_transform = T.Compose([T.ToTensor(), T.Normalize(mean, std)])
+    weak_transform = transforms.Compose([
+        transforms.RandomHorizontalFlip(), transforms.RandomCrop(size, padding=4, padding_mode="reflect"),
+        transforms.ToTensor(), transforms.Normalize(mean, std),
+    ])
+    strong_transform = transforms.Compose([
+        transforms.RandomHorizontalFlip(), transforms.RandomCrop(size, padding=4, padding_mode="reflect"),
+        transforms.RandAugment(num_ops=2, magnitude=10),
+        transforms.ToTensor(), transforms.Normalize(mean, std), transforms.RandomErasing(p=0.5),
+    ])
+    eval_transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean, std)])
 
     return weak_transform, strong_transform, eval_transform
-
-
-class BatchAugmenter:
-    """Applique un transform à un batch, en basculant v1 (liste de PIL, boucle Python) / v2 (tenseur vectorisé)."""
-
-    def __init__(self, device, use_transforms_v2):
-        self.device = device
-        self.use_v2 = use_transforms_v2
-
-    def __call__(self, transform, raw_batch):
-        if self.use_v2:
-            return transform(raw_batch.to(self.device, non_blocking=True))
-        return torch.stack([transform(img) for img in raw_batch]).to(self.device, non_blocking=True)
-
-
-class SSLCollate:
-    """Collate custom : le DataLoader ne sait pas empiler nativement une liste d'images PIL (mode v1)."""
-
-    def __init__(self, use_transforms_v2):
-        self.use_v2 = use_transforms_v2
-
-    def __call__(self, batch):
-        imgs, labels = zip(*batch)
-        imgs = torch.stack(imgs) if self.use_v2 else list(imgs)
-        return imgs, torch.tensor(labels)
-
-
-class SSLDataset(Dataset):
-    def __init__(self, base_dataset, indices, use_transforms_v2):
-        self.base_dataset = base_dataset
-        self.indices = indices
-        self.use_v2 = use_transforms_v2
-
-    def __len__(self):
-        return len(self.indices)
-
-    def __getitem__(self, idx):
-        img, label = self.base_dataset[self.indices[idx]]
-        if hasattr(label, "item"):  # medmnist renvoie un ndarray de forme (1,) plutôt qu'un int
-            label = int(np.asarray(label).reshape(-1)[0])
-        if self.use_v2:
-            img = transforms_v2.functional.pil_to_tensor(img)  # uint8 CHW -> collate direct en batch tenseur
-        return img, label
 
 
 def make_ssl_split(targets, n_labels, num_classes, seed=0):
@@ -124,7 +56,40 @@ def make_ssl_split(targets, n_labels, num_classes, seed=0):
     return labeled_idx, unlabeled_idx
 
 
-def _load_pathmnist(cfg, eval_transform):
+class LabeledDataset(Dataset):
+    """Renvoie (image transformée, label) pour le jeu labellisé."""
+
+    def __init__(self, base_dataset, indices, transform):
+        self.base_dataset = base_dataset
+        self.indices = indices
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.indices)
+
+    def __getitem__(self, idx):
+        img, label = self.base_dataset[self.indices[idx]]
+        return self.transform(img), label
+
+
+class UnlabeledDataset(Dataset):
+    """Renvoie (vue faible, vue forte) de la même image brute, pour le jeu non labellisé."""
+
+    def __init__(self, base_dataset, indices, weak_transform, strong_transform):
+        self.base_dataset = base_dataset
+        self.indices = indices
+        self.weak_transform = weak_transform
+        self.strong_transform = strong_transform
+
+    def __len__(self):
+        return len(self.indices)
+
+    def __getitem__(self, idx):
+        img, _ = self.base_dataset[self.indices[idx]]
+        return self.weak_transform(img), self.strong_transform(img)
+
+
+def _load_pathmnist(cfg):
     try:
         from medmnist import PathMNIST
     except ImportError as e:
@@ -134,32 +99,27 @@ def _load_pathmnist(cfg, eval_transform):
         ) from e
     # Contrairement à torchvision.datasets, medmnist ne crée pas `root` automatiquement.
     Path(cfg["data_root"]).mkdir(parents=True, exist_ok=True)
-    # medmnist renvoie un label comme ndarray de forme (1,), pas un int : sans target_transform, le
-    # DataLoader de test (collate par défaut, pas de passage par SSLDataset) empilerait les labels en
-    # (N, 1) et `preds == labels` ferait un broadcast (N, N) silencieusement faux dans evaluate().
+    # medmnist renvoie un label comme ndarray de forme (1,), pas un int.
     squeeze_label = lambda y: int(np.asarray(y).reshape(-1)[0])  # noqa: E731
     # Résolution native (28x28) : pas de `size=` explicite pour rester compatible avec toutes les
     # versions du package medmnist (seules certaines versions récentes exposent size=32/64/128/224).
     train_base = PathMNIST(root=cfg["data_root"], split="train", download=True, target_transform=squeeze_label)
-    test_base = PathMNIST(
-        root=cfg["data_root"], split="test", download=True,
-        transform=eval_transform, target_transform=squeeze_label,
-    )
+    test_base = PathMNIST(root=cfg["data_root"], split="test", download=True, target_transform=squeeze_label)
     targets = np.asarray(train_base.labels).reshape(-1)  # attribut brut, indépendant de target_transform
     return train_base, test_base, targets
 
 
-def load_datasets(cfg, eval_transform):
+def load_datasets(cfg, weak_transform, strong_transform, eval_transform):
     if cfg["dataset"] == "cifar10":
         train_base = torchvision.datasets.CIFAR10(cfg["data_root"], train=True, download=True)
-        test_base = torchvision.datasets.CIFAR10(cfg["data_root"], train=False, download=True, transform=eval_transform)
+        test_base = torchvision.datasets.CIFAR10(cfg["data_root"], train=False, download=True)
         targets = np.array(train_base.targets)
     elif cfg["dataset"] == "cifar100":
         train_base = torchvision.datasets.CIFAR100(cfg["data_root"], train=True, download=True)
-        test_base = torchvision.datasets.CIFAR100(cfg["data_root"], train=False, download=True, transform=eval_transform)
+        test_base = torchvision.datasets.CIFAR100(cfg["data_root"], train=False, download=True)
         targets = np.array(train_base.targets)
     elif cfg["dataset"] == "pathmnist":
-        train_base, test_base, targets = _load_pathmnist(cfg, eval_transform)
+        train_base, test_base, targets = _load_pathmnist(cfg)
     else:
         raise ValueError(f"Dataset inconnu : {cfg['dataset']} (choix : {sorted(DATASET_META)})")
 
@@ -168,29 +128,28 @@ def load_datasets(cfg, eval_transform):
         unlabeled_idx = unlabeled_idx[: cfg["debug_subset_size"]]
         test_base = Subset(test_base, list(range(min(len(test_base), cfg["debug_subset_size"]))))
 
-    labeled_set = SSLDataset(train_base, labeled_idx, cfg["use_transforms_v2"])
-    unlabeled_set = SSLDataset(train_base, unlabeled_idx, cfg["use_transforms_v2"])
-    return labeled_set, unlabeled_set, test_base
+    labeled_set = LabeledDataset(train_base, labeled_idx, weak_transform)
+    unlabeled_set = UnlabeledDataset(train_base, unlabeled_idx, weak_transform, strong_transform)
+    test_set = LabeledDataset(test_base, list(range(len(test_base))), eval_transform)
+    return labeled_set, unlabeled_set, test_set
 
 
-def infinite_loader(dataset, batch_size, cfg, collate_fn, shuffle=True):
+def infinite_loader(dataset, batch_size, cfg, shuffle=True):
     """Itérateur infini sur un DataLoader (labellisé/non-labellisé n'ont pas la même taille d'époque).
 
     Utilise un RandomSampler AVEC REMISE (pratique standard en SSL) plutôt que `shuffle=True` seul :
-    en régime de faible labellisation, le jeu labellisé (n_labels, ex. 40) est plus petit que le batch
-    (B, ex. 64). Avec `shuffle=True` + `drop_last=True`, le sampler par défaut tire exactement
-    len(dataset) indices SANS remise par "époque" -- si len(dataset) < batch_size, aucun batch complet
-    ne peut jamais être formé, et `while True: for batch in loader` boucle indéfiniment sans jamais
-    rien produire (blocage silencieux, sans erreur, quasi 0% CPU/GPU -- observé en debug sur cette
-    machine). L'échantillonnage avec remise cycle sur le jeu labellisé autant de fois que nécessaire,
-    quelle que soit sa taille par rapport à B.
+    en régime de faible labellisation, le jeu labellisé (n_labels, ex. 250) est plus petit que le
+    batch (B, ex. 64) une fois multiplié par le nombre de classes. Avec `shuffle=True` +
+    `drop_last=True`, le sampler par défaut tire exactement len(dataset) indices SANS remise par
+    "époque" -- si len(dataset) < batch_size, aucun batch complet ne peut jamais être formé, et
+    `while True: for batch in loader` boucle indéfiniment sans jamais rien produire (blocage
+    silencieux, sans erreur). L'échantillonnage avec remise cycle sur le jeu labellisé autant de fois
+    que nécessaire, quelle que soit sa taille par rapport à B.
     """
     sampler = RandomSampler(dataset, replacement=True, num_samples=batch_size * 100) if shuffle else None
     loader = DataLoader(
         dataset, batch_size=batch_size, sampler=sampler, shuffle=False if sampler else shuffle,
-        num_workers=cfg["num_workers"], pin_memory=cfg["pin_memory"],
-        persistent_workers=cfg["persistent_workers"] and cfg["num_workers"] > 0, drop_last=True,
-        collate_fn=collate_fn,
+        num_workers=cfg["num_workers"], drop_last=True,
     )
     while True:
         for batch in loader:

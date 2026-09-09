@@ -1,16 +1,12 @@
 """Post-traitement des logs JSON produits par train.py : calcule les métriques du papier (Table 1)
 qui ne sont PAS calculées pendant l'entraînement -- AUC normalisée sur [0, K], report de dernière
-valeur EMA pour les runs arrêtés tôt, itérations/FLOPs pour atteindre un seuil de performance défini
-par rapport à l'accuracy asymptotique de FixMatch dans NOTRE protocole (cf. PROJECT_SPEC.md §4/§5,
+valeur EMA pour les runs arrêtés tôt, itérations pour atteindre un seuil de performance défini par
+rapport à l'accuracy asymptotique de FixMatch dans NOTRE protocole (cf. PROJECT_SPEC.md §4,
 PDF §"Critère d'arrêt anticipé").
 
 Usage :
     python analyze.py --logs-dir ./logs --dataset cifar10 --n-labels 250 --K 131072 \
         --reference-algo fixmatch --threshold-frac 0.9
-
-    # Inspecter l'ablation lambda_mix (Phase 2, K=2**14, tags lammix0.5/lammix1.0/lammix2.0) ou
-    # l'étude de sensibilité à mu (tags mu3/mu5/mu7) -- même mécanisme de regroupement par tag :
-    python analyze.py --logs-dir ./logs --dataset cifar10 --n-labels 250 --K 16384
 """
 import argparse
 import glob
@@ -46,22 +42,16 @@ def curve_from_logs(run):
     logs = run["logs"]
     iterations = np.array([e["iteration"] for e in logs], dtype=float)
     accuracies = np.array([e["eval_accuracy"] for e in logs], dtype=float)
-    flops = np.array([e["cumulative_flops"] for e in logs], dtype=float)
-    return iterations, accuracies, flops
+    return iterations, accuracies
 
 
-def forward_fill_to_K(iterations, accuracies, flops, K):
-    """Complète la courbe jusqu'à K par report de la dernière valeur observée -- accuracy EMA ET
-    FLOPs cumulés (l'entraînement étant arrêté, aucun FLOP supplémentaire n'est dépensé) -- pour que
-    l'AUC reste calculable et comparable entre méthodes arrêtées à des itérations différentes
+def forward_fill_to_K(iterations, accuracies, K):
+    """Complète la courbe jusqu'à K par report de la dernière accuracy EMA observée -- pour que l'AUC
+    reste calculable et comparable entre méthodes arrêtées à des itérations différentes
     (cf. papier, §"Critère d'arrêt anticipé")."""
     if len(iterations) == 0 or iterations[-1] >= K:
-        return iterations, accuracies, flops
-    return (
-        np.append(iterations, K),
-        np.append(accuracies, accuracies[-1]),
-        np.append(flops, flops[-1]),
-    )
+        return iterations, accuracies
+    return np.append(iterations, K), np.append(accuracies, accuracies[-1])
 
 
 def compute_auc(iterations, accuracies, K, chance_level):
@@ -73,38 +63,35 @@ def compute_auc(iterations, accuracies, K, chance_level):
     return float(_trapezoid(y, x) / K)
 
 
-def iters_flops_to_threshold(iterations, accuracies, flops, threshold):
-    """Première itération (et FLOPs cumulés correspondants) où l'accuracy atteint `threshold`.
-    Retourne (None, None) si jamais atteint, y compris après report de dernière valeur."""
+def iters_to_threshold(iterations, accuracies, threshold):
+    """Première itération où l'accuracy atteint `threshold`. Retourne None si jamais atteint,
+    y compris après report de dernière valeur."""
     reached = np.where(accuracies >= threshold)[0]
     if len(reached) == 0:
-        return None, None
-    idx = int(reached[0])
-    return float(iterations[idx]), float(flops[idx])
+        return None
+    return float(iterations[int(reached[0])])
 
 
 def summarize_single_run(path, K, threshold=None):
     run = load_run(path)
     cfg = run["config"]
     num_classes = cfg["num_classes"]
-    iterations, accuracies, flops = curve_from_logs(run)
-    iterations, accuracies, flops = forward_fill_to_K(iterations, accuracies, flops, K)
+    iterations, accuracies = curve_from_logs(run)
+    iterations, accuracies = forward_fill_to_K(iterations, accuracies, K)
     auc = compute_auc(iterations, accuracies, K, chance_level=1.0 / num_classes)
     final_acc = float(accuracies[-1]) if len(accuracies) else float("nan")
-    iters_thr, flops_thr = (None, None)
-    if threshold is not None:
-        iters_thr, flops_thr = iters_flops_to_threshold(iterations, accuracies, flops, threshold)
+    iters_thr = iters_to_threshold(iterations, accuracies, threshold) if threshold is not None else None
     return {
         "path": str(path), "seed": cfg["seed"], "auc": auc, "final_accuracy": final_acc,
-        "iters_to_threshold": iters_thr, "flops_to_threshold": flops_thr,
+        "iters_to_threshold": iters_thr,
         "stopped_early": run.get("stopped_early", False), "last_iteration": run.get("last_iteration"),
     }
 
 
 def discover_runs(logs_dir):
     """Regroupe les logs par (algo, dataset, n_labels, K, tag) -- une entrée par graine.
-    Le tag est inclus dans la clé pour ne jamais mélanger des variantes d'ablation (ex. plusieurs
-    valeurs de lambda_mix) qui partagent (algo, dataset, n_labels, K, seed)."""
+    Le tag est inclus dans la clé pour ne jamais mélanger des variantes d'ablation qui partagent
+    (algo, dataset, n_labels, K, seed)."""
     groups = defaultdict(list)
     for path in sorted(glob.glob(str(Path(logs_dir) / "*.json"))):
         m = LOG_NAME_RE.match(Path(path).name)
@@ -162,7 +149,7 @@ def main():
               f"(moyenne sur {len(ref_runs)} graine(s))")
     else:
         print(f"ATTENTION : pas de run complet pour l'algo de référence '{args.reference_algo}' -- "
-              "la métrique itérations/FLOPs jusqu'à seuil ne sera pas calculée.")
+              "la métrique itérations jusqu'à seuil ne sera pas calculée.")
 
     threshold = reference_accuracy * args.threshold_frac if reference_accuracy is not None else None
 
@@ -175,11 +162,10 @@ def main():
             "auc": mean_std([s["auc"] for s in summaries]),
             "final_accuracy": mean_std([s["final_accuracy"] for s in summaries]),
             "iters_to_threshold": mean_std([s["iters_to_threshold"] for s in summaries]),
-            "flops_to_threshold": mean_std([s["flops_to_threshold"] for s in summaries]),
             "n_stopped_early": sum(1 for s in summaries if s["stopped_early"]),
         }
 
-    header = f"{'Méthode':<20}{'AUC':>18}{'Acc. finale':>18}{'Itérations':>20}{'FLOPs':>18}{'n':>4}"
+    header = f"{'Méthode':<20}{'AUC':>18}{'Acc. finale':>18}{'Itérations':>20}{'n':>4}"
     print("\n" + header)
     print("-" * len(header))
     for label, row in table.items():
@@ -188,7 +174,6 @@ def main():
             f"{format_pair(row['auc'], '.4f'):>18}"
             f"{format_pair(row['final_accuracy'], '.4f'):>18}"
             f"{format_pair(row['iters_to_threshold'], '.0f'):>20}"
-            f"{format_pair(row['flops_to_threshold'], '.2e'):>18}"
             f"{row['n_seeds']:>4}"
         )
 

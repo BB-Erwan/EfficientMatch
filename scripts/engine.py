@@ -1,8 +1,4 @@
-"""Boucle d'entraînement générique, partagée par tous les algorithmes SSL.
-
-Assemble données, modèle, optimiseur, scheduler et logging JSON, puis délègue la logique propre à
-chaque algorithme aux fonctions `estimate_flops_per_iter` / `make_train_step` du module `algorithms.<algo>`.
-"""
+"""Boucle d'entraînement FixMatch : assemble données, modèle, optimiseur, scheduler et logging JSON."""
 import json
 import time
 from pathlib import Path
@@ -11,7 +7,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from config import set_seed
-from data import BatchAugmenter, SSLCollate, build_transforms, infinite_loader, load_datasets
+from data import build_transforms, infinite_loader, load_datasets
 from early_stopping import detect_plateau
 from ema import EMA
 from evaluate import evaluate
@@ -21,27 +17,13 @@ from schedule import cosine_schedule
 
 def run_experiment(cfg, algo_module):
     set_seed(cfg["seed"])
-    if cfg["cudnn_benchmark"]:
-        torch.backends.cudnn.benchmark = True
-    torch.set_float32_matmul_precision(cfg["matmul_precision"])
     device = torch.device(cfg["device"])
 
     weak_transform, strong_transform, eval_transform = build_transforms(cfg)
-    augmenter = BatchAugmenter(device, cfg["use_transforms_v2"])
-    collate_fn = SSLCollate(cfg["use_transforms_v2"])
-
-    labeled_set, unlabeled_set, test_set = load_datasets(cfg, eval_transform)
-    labeled_iter = infinite_loader(labeled_set, cfg["B"], cfg, collate_fn, shuffle=True)
-    unlabeled_iter = infinite_loader(unlabeled_set, cfg["mu"] * cfg["B"], cfg, collate_fn, shuffle=True)
-    # persistent_workers : sans ça (défaut DataLoader = False), les workers sont détruits à la fin
-    # de chaque évaluation puis recréés de zéro à la suivante (chaque worker réimporte tout
-    # l'environnement Python -- lent sous Windows), provoquant une pause visible à chaque checkpoint
-    # alors que les loaders d'entraînement (infinite_loader) ne l'ont jamais eue.
-    test_loader = DataLoader(
-        test_set, batch_size=256, shuffle=False,
-        num_workers=cfg["num_workers"], pin_memory=cfg["pin_memory"],
-        persistent_workers=cfg["persistent_workers"] and cfg["num_workers"] > 0,
-    )
+    labeled_set, unlabeled_set, test_set = load_datasets(cfg, weak_transform, strong_transform, eval_transform)
+    labeled_iter = infinite_loader(labeled_set, cfg["B"], cfg, shuffle=True)
+    unlabeled_iter = infinite_loader(unlabeled_set, cfg["mu"] * cfg["B"], cfg, shuffle=True)
+    test_loader = DataLoader(test_set, batch_size=256, shuffle=False, num_workers=cfg["num_workers"])
 
     model = build_model(cfg, device)
     if cfg["use_ema"]:
@@ -54,47 +36,24 @@ def run_experiment(cfg, algo_module):
         model.parameters(), lr=cfg["lr"], momentum=cfg["momentum"],
         nesterov=cfg["nesterov"], weight_decay=cfg["weight_decay"],
     )
-    # GradScaler n'a de sens qu'en float16 (plage d'exposant réduite, risque de sous-flottement des
-    # gradients) -- inutile et silencieusement no-op en bfloat16 (même plage d'exposant que fp32),
-    # donc désactivé explicitement dans ce cas plutôt que de le laisser vivre pour rien.
-    scaler = torch.amp.GradScaler(enabled=cfg["use_amp"] and cfg["amp_dtype"] == "float16")
 
-    # Mesure réelle des FLOPs une seule fois avant la boucle (jamais à chaque itération, cf.
-    # PROJECT_SPEC.md §5). Pour la plupart des algos, `flops_measurement` est un scalaire constant.
-    # Pour Fast FixMatch (Curriculum Batch Size), c'est un dict décomposé en coût fixe + coût
-    # marginal par exemple non labellisé, car la taille réelle du batch varie au cours du run
-    # -- cf. algorithms.fast_fixmatch.flops_for_step.
-    #
-    # Mesurée sur un modèle NON compilé, jetable : FlopCounterMode intercepte les opérations au
-    # niveau dispatch, et measure `model` directement s'il est déjà compilé fausserait potentiellement
-    # le comptage (Inductor peut fusionner des opérations avant que FlopCounterMode ne les voie) --
-    # signalé par le UserWarning PyTorch "global hooks on modules ... will cause the hooks to fire an
-    # extra time" observé en pratique dès que compile_model=True.
-    flops_probe_model = build_model(dict(cfg, compile_model=False), device)
-    flops_measurement = algo_module.estimate_flops_per_iter(flops_probe_model, cfg, device)
-    del flops_probe_model
-    flops_at_max = algo_module.flops_for_step(flops_measurement, {"u_t": cfg["mu"] * cfg["B"]})
-    print(f"FLOPs (mesurés) par itération (pire cas) : {flops_at_max:.3e}")
-    print(f"FLOPs totaux estimés (pire cas) : {flops_at_max * cfg['K']:.3e}")
     print(f"Budget total : {cfg['K']} itérations")
 
-    train_step = algo_module.make_train_step(cfg, augmenter, weak_transform, strong_transform, device)
+    train_step = algo_module.make_train_step(cfg, device)
 
     Path(cfg["log_path"]).parent.mkdir(parents=True, exist_ok=True)
 
     logs = []
     acc_history = []
-    cumulative_flops = 0.0
     start_time = time.time()
     model.train()
     stopped_early = False
     last_k = 0
     for k in range(1, cfg["K"] + 1):
         cosine_schedule(optimizer, k, cfg["K"])
-        step_metrics = train_step(model, optimizer, scaler, k, labeled_iter, unlabeled_iter)
+        step_metrics = train_step(model, optimizer, labeled_iter, unlabeled_iter)
         if ema is not None:
             ema.update(model)
-        cumulative_flops += algo_module.flops_for_step(flops_measurement, step_metrics)
         last_k = k
 
         if k % cfg["eval_every"] == 0 or k == cfg["K"]:
@@ -104,7 +63,7 @@ def run_experiment(cfg, algo_module):
             elapsed = time.time() - start_time
             log_entry = {
                 "iteration": k, "elapsed_seconds": elapsed,
-                "cumulative_flops": cumulative_flops, "eval_accuracy": acc, **step_metrics,
+                "eval_accuracy": acc, **step_metrics,
             }
             logs.append(log_entry)
             extra = " ".join(f"{name}={value:.3f}" for name, value in step_metrics.items() if name != "loss")
@@ -123,8 +82,8 @@ def run_experiment(cfg, algo_module):
                     break
 
     # Marqueur de complétude (distinct d'un run interrompu/crashé en cours de route) : utilisé par
-    # run_priority_experiments.py pour savoir quels runs sauter à la reprise, et par analyze.py pour
-    # savoir jusqu'à quelle itération reporter la dernière valeur observée (cf. PROJECT_SPEC.md §4).
+    # analyze.py pour savoir jusqu'à quelle itération reporter la dernière valeur observée
+    # (cf. PROJECT_SPEC.md §4).
     with open(cfg["log_path"], "w") as f:
         json.dump({
             "config": cfg, "logs": logs, "status": "completed",
