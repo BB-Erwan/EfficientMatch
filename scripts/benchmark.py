@@ -20,10 +20,10 @@ from pathlib import Path
 
 import torch
 
-import efficientmatch
-import fixmatch
-import flexmatch
-import mixmatch
+import scripts_old.efficientmatch as efficientmatch
+import scripts_old.fixmatch as fixmatch
+import scripts_old.flexmatch as flexmatch
+import scripts_old.mixmatch as mixmatch
 
 MODULES = {
     "fixmatch": fixmatch,
