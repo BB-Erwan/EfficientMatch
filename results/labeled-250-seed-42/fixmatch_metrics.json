@@ -1,0 +1,55 @@
+{
+    "train_loss": [
+        2.298739433288574,
+        2.290339469909668
+    ],
+    "test_f1": [
+        0.018193407393917317,
+        0.01876997067983223
+    ],
+    "test_acc": [
+        0.0999,
+        0.1002
+    ],
+    "time_elapsed": [
+        5.86953330039978,
+        9.113721370697021
+    ],
+    "pl_quality": [
+        0.0,
+        0.0
+    ],
+    "mask_ratio": [
+        0.0,
+        0.0
+    ],
+    "corrections": [
+        0,
+        0
+    ],
+    "new_errors": [
+        0,
+        0
+    ],
+    "error_reinforcement": [
+        0,
+        0
+    ],
+    "correct_reinforcement": [
+        0,
+        0
+    ],
+    "new_label": [
+        0,
+        0
+    ],
+    "new_correct": [
+        0,
+        0
+    ],
+    "bad_corrections": [
+        0,
+        0
+    ],
+    "losses": []
+}

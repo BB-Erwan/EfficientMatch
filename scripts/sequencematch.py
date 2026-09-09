@@ -60,22 +60,22 @@ def str2bool(v):
 parser = argparse.ArgumentParser()
 parser.add_argument("--num_labeled", type=int, default=250)
 parser.add_argument("--optimized", type=str2bool, default=True)
-parser.add_argument("--seed", type=int, default=42)
+parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--test_period", type=int, default=500)
 parser.add_argument("--tau", type=float, default=0.95)
-parser.add_argument("--alpha", type=float, default=0.75)
 parser.add_argument("--T", type=float, default=0.5)
+parser.add_argument("--lambda_u", type=float, default=1.0)
+parser.add_argument("--thresh_warmup", type=str2bool, default=True)
+parser.add_argument("--use_flex", type=str2bool, default=True)
 parser.add_argument("--max_steps", type=int, default=2**20, help="Number of steps actually run; the run is truncated here.")
 parser.add_argument("--total_steps", type=int, default=2**20, help="Nominal horizon the cosine LR schedule decays over, independent of max_steps.")
 parser.add_argument("--verbose", type=str2bool, default=False)
 args = parser.parse_args()
 
 
-def run_efficientmatch():
-    # ── Optimisations globales ──────────────────────────────────────────────────
+def run_sequencematch():
     torch.backends.cudnn.benchmark = True
     torch.set_float32_matmul_precision("high")
-    # ───────────────────────────────────────────────────────────────────────────
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     num_classes = 10
@@ -94,8 +94,8 @@ def run_efficientmatch():
 
     num_labeled = args.num_labeled
     optimized = args.optimized
-    torch.manual_seed(args.seed)
 
+    torch.manual_seed(args.seed)
     train_ds = Subset(train_ds, torch.randperm(len(train_ds)))
 
     num_per_class = num_labeled // 10
@@ -111,32 +111,49 @@ def run_efficientmatch():
     labeled_ds = Subset(train_ds, labeled_indices)
     unlabeled_ds = Subset(train_ds, unlabeled_indices)
 
-    labeled_class_counts = torch.zeros(num_classes)
+    labeled_class_counts = torch.zeros(10)
     for _, label in labeled_ds:
         labeled_class_counts[label] += 1
     logger.info(f"Labeled class distribution: {labeled_class_counts}")
 
-    norm_transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(mean, std),
-    ])
+    norm_transform = transforms.Compose(
+        [
+            transforms.ToTensor(),
+            transforms.Normalize(mean, std),
+        ]
+    )
 
-    weak_transform = v2.Compose([
-        v2.ToImage(),
-        v2.RandomHorizontalFlip(),
-        v2.RandomCrop(32, padding=4),
-        v2.ToDtype(torch.float32, scale=True),
-        v2.Normalize(mean, std),
-    ])
+    weak_transform = v2.Compose(
+        [
+            v2.ToImage(),
+            v2.RandomHorizontalFlip(),
+            v2.RandomCrop(32, padding=4),
+            v2.ToDtype(torch.float32, scale=True),
+            v2.Normalize(mean, std),
+        ]
+    )
 
-    strong_transform = v2.Compose([
-        v2.RandAugment(num_ops=3, magnitude=5),
-        v2.ToImage(),
-        v2.RandomHorizontalFlip(),
-        v2.RandomCrop(32, padding=4),
-        v2.ToDtype(torch.float32, scale=True),
-        v2.Normalize(mean, std),
-    ])
+    medium_transform = v2.Compose(
+        [
+            v2.RandAugment(num_ops=1, magnitude=5),
+            v2.ToImage(),
+            v2.RandomHorizontalFlip(),
+            v2.RandomCrop(32, padding=4),
+            v2.ToDtype(torch.float32, scale=True),
+            v2.Normalize(mean, std),
+        ]
+    )
+
+    strong_transform = v2.Compose(
+        [
+            v2.RandAugment(num_ops=3, magnitude=5),
+            v2.ToImage(),
+            v2.RandomHorizontalFlip(),
+            v2.RandomCrop(32, padding=4),
+            v2.ToDtype(torch.float32, scale=True),
+            v2.Normalize(mean, std),
+        ]
+    )
 
     labeled_ds = TransformedDataset(labeled_ds, transforms.ToTensor())
     unlabeled_ds = TransformedDatasetWithIndex(unlabeled_ds, transform=transforms.ToTensor())
@@ -151,7 +168,7 @@ def run_efficientmatch():
     )
 
     batch_size_l = 64
-    mu = 3
+    mu = 7
 
     if optimized:
         labeled_loader = DataLoader(labeled_ds, batch_size=batch_size_l, shuffle=True, **dl_kwargs)
@@ -162,8 +179,7 @@ def run_efficientmatch():
         unlabeled_loader = DataLoader(unlabeled_ds, batch_size=batch_size_l * mu, shuffle=True)
         test_loader = DataLoader(test_ds, batch_size=256, shuffle=False)
 
-    model = WideResNet(depth=28, widen_factor=2, num_classes=num_classes)
-    model = model.to(device)
+    model = WideResNet(depth=28, widen_factor=2, num_classes=num_classes).to(device)
     if optimized:
         model = model.to(memory_format=torch.channels_last)
 
@@ -185,15 +201,14 @@ def run_efficientmatch():
         except ImportError:
             pass
 
-    method_name = "efficientmatch"
-    name_of_experiment = f"labeled-{num_labeled}-seed-{args.seed}"
-
     tau = args.tau
-    alpha = args.alpha
-    beta_dist = torch.distributions.Beta(
-        torch.tensor(alpha, device=device, dtype=torch.float32),
-        torch.tensor(alpha, device=device, dtype=torch.float32),
-    )
+    T = args.T
+    lambda_u = args.lambda_u
+    thresh_warmup = args.thresh_warmup
+    use_flex = args.use_flex
+
+    method_name = "sequencematch"
+    name_of_experiment = f"labeled-{num_labeled}-seed-{args.seed}"
 
     metrics = {
         "train_loss": [],
@@ -223,12 +238,21 @@ def run_efficientmatch():
 
     results_dir = f"results/{name_of_experiment}"
     os.makedirs(results_dir, exist_ok=True)
+
+    N_unlabeled = len(unlabeled_ds)
+    selected_label = torch.full((N_unlabeled,), -1, dtype=torch.long, device=device)
+    classwise_acc = torch.zeros(num_classes, dtype=torch.float32, device=device)
+
     start_time = time.time()
     mask_ratio = []
     losses = []
+    use_cuda_autocast = optimized and device.type == "cuda"
 
     labeled_iter = iter(labeled_loader)
     unlabeled_iter = iter(unlabeled_loader)
+
+    use_hard_labels = True
+    eps = 1e-12
 
     for step in range(max_steps):
         model.train()
@@ -245,97 +269,112 @@ def run_efficientmatch():
             unlabeled_iter = iter(unlabeled_loader)
             x_u, y_u, idx = next(unlabeled_iter)
 
+        idx_cpu = idx.cpu()
+        idx_device = idx.to(device)
+
         if optimized:
-            x_l = weak_transform(x_l).to(device, non_blocking=True, memory_format=torch.channels_last)
+            cf = torch.channels_last
+            x_l_aug = weak_transform(x_l).to(device, non_blocking=True, memory_format=cf)
             y_l = y_l.to(device, non_blocking=True)
-            x_u_w = weak_transform(x_u).to(device, non_blocking=True, memory_format=torch.channels_last)
-            x_u_s = strong_transform(x_u).to(device, non_blocking=True, memory_format=torch.channels_last)
+            x_u_w = weak_transform(x_u).to(device, non_blocking=True, memory_format=cf)
+            x_u_m = medium_transform(x_u).to(device, non_blocking=True, memory_format=cf)
+            x_u_s = strong_transform(x_u).to(device, non_blocking=True, memory_format=cf)
         else:
-            x_l = weak_transform(x_l).to(device)
+            x_l_aug = weak_transform(x_l).to(device)
             y_l = y_l.to(device)
             x_u_w = weak_transform(x_u).to(device)
+            x_u_m = medium_transform(x_u).to(device)
             x_u_s = strong_transform(x_u).to(device)
 
-        with torch.no_grad():
-            with autocast(device_type="cuda", dtype=torch.bfloat16):
-                logits_u_w = model(x_u_w)
-            probs_u_w = F.softmax(logits_u_w.float(), dim=1)
-            max_prob, pseudo = torch.max(probs_u_w, dim=1)
-            mask = max_prob.ge(tau).float()
-            mask_ratio.append(mask.mean().item())
+        selected_counts = torch.bincount(selected_label + 1, minlength=num_classes + 1)
+        if selected_counts.max().item() < selected_label.shape[0]:
+            counts_per_class = selected_counts[1:].float()
+            if thresh_warmup:
+                denom = max(selected_counts.max().item(), 1)
+                classwise_acc = counts_per_class / denom
+            else:
+                wo_negative_one = selected_counts.clone()
+                wo_negative_one[0] = 0
+                denom = max(wo_negative_one.max().item(), 1)
+                classwise_acc = counts_per_class / denom
 
         optimizer.zero_grad(set_to_none=True)
 
-        with autocast(device_type="cuda", dtype=torch.bfloat16) if optimized else nullcontext():
-            batch_size_l_cur = x_l.shape[0]
-            all_logits = model(torch.cat([x_l, x_u_s], dim=0))
-            logits_l = all_logits[:batch_size_l_cur]
-            logits_u_s = all_logits[batch_size_l_cur:]
+        train_ctx = autocast(device_type="cuda", dtype=torch.bfloat16) if use_cuda_autocast else nullcontext()
+        with train_ctx:
+            all_logits = model(torch.cat([x_l_aug, x_u_w, x_u_m, x_u_s], dim=0))
+            n_l = x_l_aug.shape[0]
+            n_u = x_u_w.shape[0]
 
-            loss_supervised = F.cross_entropy(logits_l, y_l)
-            loss_consistency = (
-                mask * F.cross_entropy(logits_u_s, pseudo, reduction="none")
-            ).mean()
+            logits_l = all_logits[:n_l]
+            logits_w = all_logits[n_l:n_l + n_u]
+            logits_m = all_logits[n_l + n_u:n_l + 2 * n_u]
+            logits_s = all_logits[n_l + 2 * n_u:]
 
-            all_inputs = torch.cat([x_l, x_u_w], dim=0)
-            all_targets = torch.cat(
-                [
-                    F.one_hot(y_l, num_classes=num_classes).float(),
-                    F.one_hot(pseudo, num_classes=num_classes).float(),
-                ],
-                dim=0,
-            )
-            all_masks = torch.cat([torch.ones(batch_size_l_cur, device=device), mask], dim=0)
+            sup_loss = F.cross_entropy(logits_l, y_l, reduction="mean")
 
-            indices = torch.randperm(all_inputs.size(0), device=all_inputs.device)
-            all_inputs = all_inputs[indices]
-            all_targets = all_targets[indices]
-            all_masks = all_masks[indices]
+            probs_w = torch.softmax(logits_w.detach(), dim=-1)
+            max_probs_w, pseudo_w = torch.max(probs_w, dim=-1)
+            if use_flex:
+                cutoff_w = tau * (classwise_acc[pseudo_w] / (2.0 - classwise_acc[pseudo_w] + eps))
+                mask_w = max_probs_w.ge(cutoff_w).float()
+            else:
+                mask_w = max_probs_w.ge(tau).float()
 
-            lam_x = beta_dist.sample((batch_size_l_cur,))
-            lam_u = beta_dist.sample((x_u_w.size(0),))
-            lam_x = torch.maximum(lam_x, 1 - lam_x)
-            lam_u = torch.maximum(lam_u, 1 - lam_u)
+            select = max_probs_w.ge(tau).long()
 
-            lam_x_img = lam_x.view(-1, 1, 1, 1)
-            lam_u_img = lam_u.view(-1, 1, 1, 1)
-            lam_x_lbl = lam_x.view(-1, 1)
-            lam_u_lbl = lam_u.view(-1, 1)
+            if use_hard_labels:
+                ce_per_sample = F.cross_entropy(logits_s, pseudo_w, reduction="none")
+            else:
+                soft_targets_w = torch.softmax(logits_w.detach() / T, dim=-1)
+                ce_per_sample = -(soft_targets_w * F.log_softmax(logits_s, dim=-1)).sum(dim=-1)
+            unsup_loss_ce = (ce_per_sample * mask_w).mean()
 
-            mixup_x = torch.lerp(all_inputs[:batch_size_l_cur], x_l, lam_x_img)
-            mixup_u = torch.lerp(all_inputs[batch_size_l_cur:], x_u_w, lam_u_img)
+            tgt_w = torch.softmax((logits_w.detach() / T), dim=-1)
+            kld_mw = F.kl_div(F.log_softmax(logits_m, dim=-1), tgt_w, reduction="none").sum(dim=-1)
+            unsup_loss_mw = (kld_mw * mask_w).mean()
 
-            mixup_targets_x = torch.lerp(all_targets[:batch_size_l_cur], F.one_hot(y_l, num_classes=num_classes).float(), lam_x_lbl)
-            mixup_targets_u = torch.lerp(all_targets[batch_size_l_cur:], probs_u_w, lam_u_lbl)
+            probs_m = torch.softmax(logits_m.detach(), dim=-1)
+            max_probs_m, pseudo_m = torch.max(probs_m, dim=-1)
+            if use_flex:
+                cutoff_m = tau * (classwise_acc[pseudo_m] / (2.0 - classwise_acc[pseudo_m] + eps))
+                mask_m = max_probs_m.ge(cutoff_m).float()
+            else:
+                mask_m = max_probs_m.ge(tau).float()
 
-            all_mixup_inputs = torch.cat([mixup_x, mixup_u], dim=0)
-            all_logits = model(all_mixup_inputs)
-            logits_l_mixup = all_logits[:batch_size_l_cur]
-            logits_u_mixup = all_logits[batch_size_l_cur:]
+            tgt_m = torch.softmax((logits_m.detach() / T), dim=-1)
+            kld_sm = F.kl_div(F.log_softmax(logits_s, dim=-1), tgt_m, reduction="none").sum(dim=-1)
+            unsup_loss_sm = (kld_sm * mask_m).mean()
 
-            loss_mixup = (
-                all_masks[:batch_size_l_cur] * F.cross_entropy(logits_l_mixup, mixup_targets_x.argmax(dim=1), reduction="none")
-            ).mean() + (
-                all_masks[batch_size_l_cur:] * F.cross_entropy(logits_u_mixup, mixup_targets_u.argmax(dim=1), reduction="none")
-            ).mean()
-            loss = loss_supervised + loss_consistency + loss_mixup
+            kld_sw = F.kl_div(F.log_softmax(logits_s, dim=-1), tgt_w, reduction="none").sum(dim=-1)
+            unsup_loss_sw = (kld_sw * mask_w).mean()
 
-            losses.append(loss.item())
+            unsup_loss = unsup_loss_ce + unsup_loss_mw + unsup_loss_sm + unsup_loss_sw
+            loss_total = sup_loss + lambda_u * unsup_loss
+            losses.append(loss_total.item())
 
-        loss.backward()
+        if idx_device[select == 1].nelement() != 0:
+            selected_label[idx_device[select == 1]] = pseudo_w[select == 1]
+
+        loss_total.backward()
         optimizer.step()
         scheduler.step()
 
-        pseudo_labels[idx] = torch.where(mask.bool().cpu(), pseudo.cpu(), pseudo_labels[idx])
-        confidences[idx] = torch.where(mask.bool().cpu(), max_prob.cpu(), confidences[idx])
+        mask_ratio.append(mask_w.mean().item())
+
+        mask_cpu = (select == 1).to(dtype=torch.bool, device="cpu")
+        pseudo_cpu = pseudo_w.detach().cpu()
+        max_probs_cpu = max_probs_w.detach().cpu()
+        pseudo_labels[idx_cpu] = torch.where(mask_cpu, pseudo_cpu, pseudo_labels[idx_cpu])
+        confidences[idx_cpu] = torch.where(mask_cpu, max_probs_cpu, confidences[idx_cpu])
 
         if (step + 1) % test_period == 0 or step == 0 or step == max_steps - 1:
             f1, acc = evaluate_f1_and_accuracy(model, test_loader, device)
             metrics["test_f1"].append(f1)
             metrics["test_acc"].append(acc)
             metrics["time_elapsed"].append(time.time() - start_time)
-            metrics["mask_ratio"].append(np.mean(mask_ratio))
-            metrics["train_loss"].append(np.mean(losses))
+            metrics["mask_ratio"].append(float(np.mean(mask_ratio)) if mask_ratio else 0.0)
+            metrics["train_loss"].append(float(np.mean(losses)) if losses else 0.0)
             mask_ratio = []
             losses = []
 
@@ -362,8 +401,8 @@ def run_efficientmatch():
             )
         elif verbose:
             print(
-                f"Step {step + 1}/{max_steps}, Loss: {loss.item():.4f}, "
-                f"Sup: {loss_supervised.item():.4f}, Cons: {loss_consistency.item():.4f}, Mixup: {loss_mixup.item():.4f}, "
+                f"Step {step + 1}/{max_steps}, Loss: {loss_total.item():.4f}, "
+                f"Sup: {sup_loss.item():.4f}, Unsup: {unsup_loss.item():.4f}, "
                 f"Mask Ratio: {mask_ratio[-1]:.4f}",
                 end="\r",
                 flush=True,
@@ -371,4 +410,4 @@ def run_efficientmatch():
 
 
 if __name__ == "__main__":
-    run_efficientmatch()
+    run_sequencematch()

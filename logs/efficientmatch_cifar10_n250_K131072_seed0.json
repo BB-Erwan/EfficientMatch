@@ -1,0 +1,100 @@
+{
+  "config": {
+    "n_labels": 250,
+    "B": 64,
+    "mu": 3,
+    "lr": 0.03,
+    "momentum": 0.9,
+    "nesterov": true,
+    "weight_decay": 0.0005,
+    "tau": 0.95,
+    "lambda_u": 1.0,
+    "lambda_mix": 1.0,
+    "alpha_mix": 0.75,
+    "amp": true,
+    "use_ema": false,
+    "ema_decay": 0.999,
+    "depth": 28,
+    "widen_factor": 2,
+    "K": 131072,
+    "eval_every": 512,
+    "seed": 0,
+    "tag": "",
+    "num_workers": 2,
+    "pin_memory": true,
+    "debug_subset_size": null,
+    "verbose": true,
+    "data_root": "C:\\Users\\erwan.bertrand\\Documents\\GitHub\\EfficientMatch\\data",
+    "algo": "efficientmatch",
+    "dataset": "cifar10",
+    "num_classes": 10
+  },
+  "logs": [
+    {
+      "iteration": 512,
+      "elapsed_seconds": 124.69582772254944,
+      "eval_accuracy": 0.2111,
+      "loss": 3.2347819805145264,
+      "loss_s": 2.178466796875,
+      "loss_u": 0.0,
+      "loss_mixup": 1.0563151836395264,
+      "mask_rate": 0.0,
+      "pl_quality": NaN
+    },
+    {
+      "iteration": 1024,
+      "elapsed_seconds": 219.65475606918335,
+      "eval_accuracy": 0.2367,
+      "loss": 2.9681396484375,
+      "loss_s": 1.90753173828125,
+      "loss_u": 0.0,
+      "loss_mixup": 1.06060791015625,
+      "mask_rate": 1.0172526344831567e-05,
+      "pl_quality": 1.0
+    },
+    {
+      "iteration": 1536,
+      "elapsed_seconds": 314.46061611175537,
+      "eval_accuracy": 0.2605,
+      "loss": 2.7696433067321777,
+      "loss_s": 1.76617431640625,
+      "loss_u": 0.0,
+      "loss_mixup": 1.0034688711166382,
+      "mask_rate": 1.0172526344831567e-05,
+      "pl_quality": 1.0
+    },
+    {
+      "iteration": 2048,
+      "elapsed_seconds": 408.79089879989624,
+      "eval_accuracy": 0.2773,
+      "loss": 2.6141154766082764,
+      "loss_s": 1.7406005859375,
+      "loss_u": 0.0,
+      "loss_mixup": 0.8735148310661316,
+      "mask_rate": 4.069010537932627e-05,
+      "pl_quality": 0.5
+    },
+    {
+      "iteration": 2560,
+      "elapsed_seconds": 507.8272726535797,
+      "eval_accuracy": 0.287,
+      "loss": 2.255047559738159,
+      "loss_s": 1.3411865234375,
+      "loss_u": 0.0079345703125,
+      "loss_mixup": 0.9059264063835144,
+      "mask_rate": 0.0003356933693794417,
+      "pl_quality": 0.45454545454545453
+    },
+    {
+      "iteration": 3072,
+      "elapsed_seconds": 603.211058139801,
+      "eval_accuracy": 0.2922,
+      "loss": 2.127532958984375,
+      "loss_s": 1.39385986328125,
+      "loss_u": 0.0,
+      "loss_mixup": 0.733673095703125,
+      "mask_rate": 0.0007934570548968622,
+      "pl_quality": 0.5641025641025641
+    }
+  ]
+}

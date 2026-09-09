@@ -1,0 +1,42 @@
+{
+    "train_loss": [
+        2.32177734375
+    ],
+    "test_f1": [
+        0.037986797648231256
+    ],
+    "test_acc": [
+        0.1012
+    ],
+    "time_elapsed": [
+        48.1158013343811
+    ],
+    "pl_quality": [
+        0.0
+    ],
+    "mask_ratio": [
+        0.0
+    ],
+    "corrections": [
+        0
+    ],
+    "new_errors": [
+        0
+    ],
+    "error_reinforcement": [
+        0
+    ],
+    "correct_reinforcement": [
+        0
+    ],
+    "new_label": [
+        0
+    ],
+    "new_correct": [
+        0
+    ],
+    "bad_corrections": [
+        0
+    ],
+    "losses": []
+}
