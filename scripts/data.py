@@ -71,7 +71,7 @@ class MultiViewDataset(Dataset):
         return (*views, label, idx)
 
 
-def infinite_loader(dataset, batch_size, num_workers, shuffle=True):
+def infinite_loader(dataset, batch_size, num_workers, shuffle=True, pin_memory=False):
     """Itérateur infini sur un DataLoader (labellisé/non-labellisé n'ont pas la même taille d'époque).
 
     Utilise un RandomSampler AVEC REMISE (pratique standard en SSL) plutôt que `shuffle=True` seul :
@@ -82,11 +82,21 @@ def infinite_loader(dataset, batch_size, num_workers, shuffle=True):
     `while True: for batch in loader` boucle indéfiniment sans jamais rien produire (blocage
     silencieux, sans erreur). L'échantillonnage avec remise cycle sur le jeu labellisé autant de fois
     que nécessaire, quelle que soit sa taille par rapport à B.
+
+    `persistent_workers=True` (dès que num_workers > 0) : sans ça, les workers seraient détruits puis
+    recréés de zéro à chaque fois que ce générateur relance un nouvel itérateur sur `loader` (toutes
+    les `batch_size * 100` données, cf. RandomSampler ci-dessus) -- chaque worker réimporte alors tout
+    l'environnement Python, lent sous Windows, provoquant une pause visible et périodique.
+    `pin_memory` (laissé au choix de l'appelant, généralement `device.type == "cuda"`) épingle les
+    batches en mémoire page-verrouillée pour un transfert CPU->GPU asynchrone plus rapide -- à
+    combiner avec `.to(device, non_blocking=True)` côté appelant pour en tirer parti.
     """
     sampler = RandomSampler(dataset, replacement=True, num_samples=batch_size * 100) if shuffle else None
     loader = DataLoader(
         dataset, batch_size=batch_size, sampler=sampler, shuffle=False if sampler else shuffle,
-        num_workers=num_workers, drop_last=True,
+        num_workers=num_workers, drop_last=True, pin_memory=pin_memory,
+        persistent_workers=num_workers > 0,
+        **({"prefetch_factor": 4} if num_workers > 0 else {}),
     )
     while True:
         for batch in loader:

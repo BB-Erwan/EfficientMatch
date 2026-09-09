@@ -7,7 +7,7 @@ def evaluate(model, test_loader, device):
     model.eval()
     correct, total = 0, 0
     for imgs, labels in test_loader:
-        imgs, labels = imgs.to(device), labels.to(device)
+        imgs, labels = imgs.to(device, non_blocking=True), labels.to(device, non_blocking=True)
         logits = model(imgs)
         preds = logits.argmax(dim=1)
         correct += (preds == labels).sum().item()

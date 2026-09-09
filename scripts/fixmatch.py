@@ -50,7 +50,7 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MEAN, STD, IMAGE_SIZE, NUM_CLASSES = (0.4914, 0.4822, 0.4465), (0.2471, 0.2435, 0.2616), 32, 10
 
 
-def parse_args():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--n-labels", type=int, default=250)
     parser.add_argument("--B", type=int, default=64)
@@ -69,7 +69,7 @@ def parse_args():
                          help="torch.compile(model) pour accélérer l'entraînement (coût de compilation "
                               "ponctuel amorti sur toute la durée du run) -- ignoré silencieusement si "
                               "triton est indisponible")
-    parser.add_argument("--use-ema", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--use-ema", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--ema-decay", type=float, default=0.999)
     parser.add_argument("--depth", type=int, default=28)
     parser.add_argument("--widen-factor", type=int, default=2)
@@ -78,11 +78,15 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--tag", type=str, default="", help="étiquette libre incluse dans le nom du fichier de log")
     parser.add_argument("--num-workers", type=int, default=2)
+    parser.add_argument("--pin-memory", action=argparse.BooleanOptionalAction, default=True,
+                         help="epingle les batches en memoire page-verrouillee (DataLoader "
+                              "pin_memory) pour un transfert CPU->GPU asynchrone plus rapide "
+                              "(non_blocking=True) -- sans effet sur CPU")
     parser.add_argument("--debug-subset-size", type=int, default=None)
     parser.add_argument("--verbose", action=argparse.BooleanOptionalAction, default=False,
                          help="affiche une ligne à CHAQUE itération (loss, it/s) pour suivre la vitesse en direct")
     parser.add_argument("--data-root", type=str, default=os.path.join(_PROJECT_ROOT, "data"))
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def set_seed(seed):
@@ -97,6 +101,121 @@ def cosine_schedule(optimizer, k, K, base_lr):
     new_lr = base_lr * math.cos(7 * math.pi * k / (16 * K))
     for group in optimizer.param_groups:
         group["lr"] = max(new_lr, 0.0)
+
+
+def estimate_flops_per_iter(args, device):
+    """Mesure réelle des FLOPs (forward + backward) pour une itération FixMatch, sur un modèle
+    jetable et des tenseurs factices de la bonne forme -- le résultat ne dépend que des formes
+    (batch, canaux, résolution), jamais du contenu des données, donc pas besoin de CIFAR-10 ici."""
+    from torch.utils.flop_counter import FlopCounterMode
+
+    model = WideResNet(num_classes=NUM_CLASSES, depth=args.depth, widen_factor=args.widen_factor).to(device)
+    model.train()
+    B, muB = args.B, args.mu * args.B
+    dummy_x = torch.randn(B, 3, IMAGE_SIZE, IMAGE_SIZE, device=device)
+    dummy_u_w = torch.randn(muB, 3, IMAGE_SIZE, IMAGE_SIZE, device=device)
+    dummy_u_s = torch.randn(muB, 3, IMAGE_SIZE, IMAGE_SIZE, device=device)
+    dummy_labels_x = torch.randint(0, NUM_CLASSES, (B,), device=device)
+    dummy_labels_u = torch.randint(0, NUM_CLASSES, (muB,), device=device)
+    model.zero_grad(set_to_none=True)
+    with FlopCounterMode(display=False) as flop_counter:
+        logits_x = model(dummy_x)
+        with torch.no_grad():
+            _ = model(dummy_u_w)
+        logits_u_s = model(dummy_u_s)
+        loss = F.cross_entropy(logits_x, dummy_labels_x) + F.cross_entropy(logits_u_s, dummy_labels_u)
+        loss.backward()
+    model.zero_grad(set_to_none=True)
+    return flop_counter.get_total_flops()
+
+
+def estimate_time_per_iter(args, device, warmup_iters=20, bench_iters=100):
+    """Chronomètre individuellement `bench_iters` itérations réelles (après `warmup_iters` itérations
+    de chauffe non chronométrées -- nécessaires pour que cudnn.benchmark/torch.compile/l'allocateur
+    CUDA se stabilisent) sur CIFAR-10 (respecte `args.debug_subset_size` pour rester rapide). Reproduit
+    fidèlement la boucle de main() (mêmes appels, mêmes options --compile/--amp), sans EMA ni
+    logging/évaluation -- ce n'est pas un run réel, juste une mesure de vitesse.
+
+    Retourne (moyenne, écart-type) en secondes/itération sur les itérations chronométrées : un
+    `bench_iters` pas trop petit et un écart-type explicite permettent de repérer une mesure encore
+    instable (le tout début de l'entraînement peut être irrégulier -- recompilation tardive d'une
+    branche pas vue pendant la chauffe, effets de cache) plutôt que de figer une moyenne trompeuse
+    sur trop peu de points."""
+    weak_transform = transforms.Compose([
+        transforms.ToImage(),
+        transforms.RandomHorizontalFlip(), transforms.RandomCrop(IMAGE_SIZE, padding=4, padding_mode="reflect"),
+        transforms.ToDtype(torch.float32, scale=True), transforms.Normalize(MEAN, STD),
+    ])
+    strong_transform = transforms.Compose([
+        transforms.ToImage(),
+        transforms.RandomHorizontalFlip(), transforms.RandomCrop(IMAGE_SIZE, padding=4, padding_mode="reflect"),
+        transforms.RandAugment(num_ops=2, magnitude=10),
+        transforms.ToDtype(torch.float32, scale=True), transforms.Normalize(MEAN, STD),
+        transforms.RandomErasing(p=0.5),
+    ])
+    train_base, _ = load_cifar10(args.data_root)
+    targets = np.array(train_base.targets)
+    labeled_idx, unlabeled_idx = make_ssl_split(targets, args.n_labels, NUM_CLASSES, seed=args.seed)
+    if args.debug_subset_size is not None:
+        unlabeled_idx = unlabeled_idx[: args.debug_subset_size]
+    labeled_set = LabeledDataset(train_base, labeled_idx, weak_transform)
+    unlabeled_set = MultiViewDataset(train_base, unlabeled_idx, [weak_transform, strong_transform])
+    pin_memory = args.pin_memory and device.type == "cuda"
+    labeled_iter = infinite_loader(labeled_set, args.B, args.num_workers, shuffle=True, pin_memory=pin_memory)
+    unlabeled_iter = infinite_loader(
+        unlabeled_set, args.mu * args.B, args.num_workers, shuffle=True, pin_memory=pin_memory,
+    )
+
+    base_model = WideResNet(num_classes=NUM_CLASSES, depth=args.depth, widen_factor=args.widen_factor).to(device)
+    model = base_model
+    if args.compile:
+        try:
+            import triton  # noqa: F401
+            model = torch.compile(base_model)
+        except ImportError:
+            pass
+    optimizer = torch.optim.SGD(
+        base_model.parameters(), lr=args.lr, momentum=args.momentum,
+        nesterov=args.nesterov, weight_decay=args.weight_decay,
+    )
+    base_model.train()
+
+    def step(k):
+        cosine_schedule(optimizer, k, args.K, args.lr)
+        imgs_x, labels_x = next(labeled_iter)
+        imgs_x, labels_x = imgs_x.to(device, non_blocking=True), labels_x.to(device, non_blocking=True)
+        imgs_u_w, imgs_u_s, _true_u, _idx = next(unlabeled_iter)
+        imgs_u_w, imgs_u_s = imgs_u_w.to(device, non_blocking=True), imgs_u_s.to(device, non_blocking=True)
+
+        optimizer.zero_grad(set_to_none=True)
+        with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=args.amp):
+            logits_x = model(imgs_x)
+            loss_s = F.cross_entropy(logits_x, labels_x)
+            with torch.no_grad():
+                logits_u_w = model(imgs_u_w)
+                max_probs, pseudo_labels = F.softmax(logits_u_w, dim=-1).max(dim=-1)
+            mask = max_probs.ge(args.tau).float()
+            logits_u_s = model(imgs_u_s)
+            loss_u = (F.cross_entropy(logits_u_s, pseudo_labels, reduction="none") * mask).mean()
+            loss = loss_s + args.lambda_u * loss_u
+        loss.backward()
+        optimizer.step()
+
+    for k in range(1, warmup_iters + 1):
+        step(k)
+    if device.type == "cuda":
+        torch.cuda.synchronize()
+
+    timings = []
+    for k in range(warmup_iters + 1, warmup_iters + bench_iters + 1):
+        t0 = time.time()
+        step(k)
+        if device.type == "cuda":
+            torch.cuda.synchronize()
+        timings.append(time.time() - t0)
+
+    timings = torch.tensor(timings)
+    return timings.mean().item(), timings.std().item()
 
 
 def main():
@@ -143,9 +262,15 @@ def main():
     unlabeled_set = MultiViewDataset(train_base, unlabeled_idx, [weak_transform, strong_transform])
     test_set = LabeledDataset(test_base, list(range(len(test_base))), eval_transform)
 
-    labeled_iter = infinite_loader(labeled_set, args.B, args.num_workers, shuffle=True)
-    unlabeled_iter = infinite_loader(unlabeled_set, args.mu * args.B, args.num_workers, shuffle=True)
-    test_loader = DataLoader(test_set, batch_size=256, shuffle=False, num_workers=args.num_workers)
+    pin_memory = args.pin_memory and device.type == "cuda"
+    labeled_iter = infinite_loader(labeled_set, args.B, args.num_workers, shuffle=True, pin_memory=pin_memory)
+    unlabeled_iter = infinite_loader(
+        unlabeled_set, args.mu * args.B, args.num_workers, shuffle=True, pin_memory=pin_memory,
+    )
+    test_loader = DataLoader(
+        test_set, batch_size=256, shuffle=False, num_workers=args.num_workers,
+        pin_memory=pin_memory, persistent_workers=args.num_workers > 0,
+    )
 
     # --- Modèle + EMA débrayable (use_ema=False -> évalue directement les poids en cours d'entraînement) ---
     base_model = WideResNet(num_classes=NUM_CLASSES, depth=args.depth, widen_factor=args.widen_factor).to(device)
@@ -194,12 +319,15 @@ def main():
 
         # --- batch labellisé ---
         imgs_x, labels_x = next(labeled_iter)
-        imgs_x, labels_x = imgs_x.to(device), labels_x.to(device)
+        imgs_x, labels_x = imgs_x.to(device, non_blocking=True), labels_x.to(device, non_blocking=True)
 
         # --- batch non labellisé, deux vues (faible / forte) + vrai label (chargé directement via le
         # DataLoader, avec le batch -- pas de lookup séparé -- pour le suivi diagnostique ci-dessous) ---
         imgs_u_w, imgs_u_s, true_u, _idx = next(unlabeled_iter)
-        imgs_u_w, imgs_u_s, true_u = imgs_u_w.to(device), imgs_u_s.to(device), true_u.to(device)
+        imgs_u_w, imgs_u_s, true_u = (
+            imgs_u_w.to(device, non_blocking=True), imgs_u_s.to(device, non_blocking=True),
+            true_u.to(device, non_blocking=True),
+        )
 
         optimizer.zero_grad(set_to_none=True)
 
