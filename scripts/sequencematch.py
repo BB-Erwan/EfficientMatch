@@ -19,7 +19,7 @@ sys.path.append("..")  # add parent directory to path for imports
 
 from datasets_utils import TransformedDataset, TransformedDatasetWithIndex
 from models import WideResNet
-from utils import evaluate_f1_and_accuracy
+from utils import evaluate_f1_and_accuracy, build_lr_scheduler
 from ema import EMA
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -70,6 +70,7 @@ parser.add_argument("--thresh_warmup", type=str2bool, default=True)
 parser.add_argument("--use_flex", type=str2bool, default=True)
 parser.add_argument("--max_steps", type=int, default=2**20, help="Number of steps actually run; the run is truncated here.")
 parser.add_argument("--total_steps", type=int, default=2**20, help="Nominal horizon the cosine LR schedule decays over, independent of max_steps.")
+parser.add_argument("--lr_schedule", type=str, default="fixmatch_cosine", choices=["fixmatch_cosine", "cosine_annealing"], help="LR schedule: rescaled FixMatch cosine (default) or torch's classic CosineAnnealingLR.")
 parser.add_argument("--verbose", type=str2bool, default=False)
 parser.add_argument("--use_ema", type=str2bool, default=False, help="Evaluate an EMA of the weights instead of the raw training weights.")
 parser.add_argument("--ema_decay", type=float, default=0.999)
@@ -208,7 +209,7 @@ def run_sequencematch():
     optimizer = torch.optim.SGD(
         model.parameters(), lr=0.03, momentum=0.9, weight_decay=5e-4, nesterov=True
     )
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_steps)
+    scheduler = build_lr_scheduler(optimizer, total_steps, schedule=args.lr_schedule)
 
     if optimized and torch.cuda.is_available() and "5060" in torch.cuda.get_device_name(0):
         try:
