@@ -192,6 +192,11 @@ def run_fixmatch():
         eval_model = model
         ema = None
 
+    # torch.compile() below wraps model in a module whose state_dict() keys are prefixed
+    # (e.g. "_orig_mod.conv1.weight"), which would break EMA's key lookup -- keep a
+    # reference to the uncompiled module (same underlying parameters) for EMA updates.
+    base_model = model
+
     logger.info(f"Number of parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     max_steps = args.max_steps
@@ -214,7 +219,7 @@ def run_fixmatch():
 
     # -- Hyper-parameters FixMatch ---------------------------------------------
     # tau=0.95 (confidence), mu=7 (unlabeled:labeled ratio), loss=Ls+Lu
-    method_name = "fixmatch"
+    method_name = "fixmatch" + ("_ema" if args.use_ema else "")
     name_of_experiment = f"labeled-{num_labeled}-seed-{args.seed}"
 
     metrics = {
@@ -318,7 +323,7 @@ def run_fixmatch():
         # ─────────────────────────────────────────────────────────────────────
 
         if ema is not None:
-            ema.update(model)
+            ema.update(base_model)
 
         # update pseudo_labels passing throught the mask to avoid updating pseudo_labels for low confidence samples
         pseudo_labels[idx] = torch.where(mask.bool().cpu(), pseudo.cpu(), pseudo_labels[idx])

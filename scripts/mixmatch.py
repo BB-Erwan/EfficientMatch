@@ -174,6 +174,11 @@ def run_mixmatch():
         eval_model = model
         ema = None
 
+    # torch.compile() below wraps model in a module whose state_dict() keys are prefixed
+    # (e.g. "_orig_mod.conv1.weight"), which would break EMA's key lookup -- keep a
+    # reference to the uncompiled module (same underlying parameters) for EMA updates.
+    base_model = model
+
     logger.info(f"Number of parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     max_steps = args.max_steps
@@ -192,7 +197,7 @@ def run_mixmatch():
         except ImportError:
             pass
 
-    method_name = "mixmatch"
+    method_name = "mixmatch" + ("_ema" if args.use_ema else "")
     name_of_experiment = f"labeled-{num_labeled}-seed-{args.seed}"
 
     metrics = {
@@ -325,7 +330,7 @@ def run_mixmatch():
         scheduler.step()
 
         if ema is not None:
-            ema.update(model)
+            ema.update(base_model)
 
         idx_cpu = idx.cpu()
         pseudo_labels[idx_cpu] = torch.argmax(probs_avg, dim=1).cpu()

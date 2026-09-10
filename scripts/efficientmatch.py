@@ -69,6 +69,7 @@ parser.add_argument("--T", type=float, default=0.5)
 parser.add_argument("--max_steps", type=int, default=2**20, help="Number of steps actually run; the run is truncated here.")
 parser.add_argument("--total_steps", type=int, default=2**20, help="Nominal horizon the cosine LR schedule decays over, independent of max_steps.")
 parser.add_argument("--verbose", type=str2bool, default=False)
+parser.add_argument("--target_acc", type=float, default=None, help="Stop the run early once test_acc reaches this value.")
 parser.add_argument("--use_ema", type=str2bool, default=False, help="Evaluate an EMA of the weights instead of the raw training weights.")
 parser.add_argument("--ema_decay", type=float, default=0.999)
 args = parser.parse_args()
@@ -180,6 +181,11 @@ def run_efficientmatch():
         eval_model = model
         ema = None
 
+    # torch.compile() below wraps model in a module whose state_dict() keys are prefixed
+    # (e.g. "_orig_mod.conv1.weight"), which would break EMA's key lookup -- keep a
+    # reference to the uncompiled module (same underlying parameters) for EMA updates.
+    base_model = model
+
     logger.info(f"Number of parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     max_steps = args.max_steps
@@ -198,7 +204,7 @@ def run_efficientmatch():
         except ImportError:
             pass
 
-    method_name = "efficientmatch"
+    method_name = "efficientmatch" + ("_ema" if args.use_ema else "")
     name_of_experiment = f"labeled-{num_labeled}-seed-{args.seed}"
 
     tau = args.tau
@@ -233,6 +239,7 @@ def run_efficientmatch():
 
     test_period = args.test_period
     verbose = args.verbose
+    target_acc = args.target_acc
 
     results_dir = f"results/{name_of_experiment}"
     os.makedirs(results_dir, exist_ok=True)
@@ -340,7 +347,7 @@ def run_efficientmatch():
         scheduler.step()
 
         if ema is not None:
-            ema.update(model)
+            ema.update(base_model)
 
         pseudo_labels[idx] = torch.where(mask.bool().cpu(), pseudo.cpu(), pseudo_labels[idx])
         confidences[idx] = torch.where(mask.bool().cpu(), max_prob.cpu(), confidences[idx])
@@ -378,6 +385,10 @@ def run_efficientmatch():
                 f"Corrections: {pl_metrics['corrections']}, Bad Corrections: {pl_metrics['bad_corrections']}, New Errors: {pl_metrics['new_errors']}, New Correct: {pl_metrics['new_correct']}, Loss: {metrics['train_loss'][-1]:.4f}, "
                 f"Time: {metrics['time_elapsed'][-1]:.2f}s"
             )
+
+            if target_acc is not None and acc >= target_acc:
+                logger.info(f"Reached target_acc={target_acc:.4f} at step {step + 1} (acc={acc:.4f}) — stopping early.")
+                break
         elif verbose:
             print(
                 f"Step {step + 1}/{max_steps}, Loss: {loss.item():.4f}, "

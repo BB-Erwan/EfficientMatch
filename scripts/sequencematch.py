@@ -196,6 +196,11 @@ def run_sequencematch():
         eval_model = model
         ema = None
 
+    # torch.compile() below wraps model in a module whose state_dict() keys are prefixed
+    # (e.g. "_orig_mod.conv1.weight"), which would break EMA's key lookup -- keep a
+    # reference to the uncompiled module (same underlying parameters) for EMA updates.
+    base_model = model
+
     logger.info(f"Number of parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     max_steps = args.max_steps
@@ -220,7 +225,7 @@ def run_sequencematch():
     thresh_warmup = args.thresh_warmup
     use_flex = args.use_flex
 
-    method_name = "sequencematch"
+    method_name = "sequencematch" + ("_ema" if args.use_ema else "")
     name_of_experiment = f"labeled-{num_labeled}-seed-{args.seed}"
 
     metrics = {
@@ -374,7 +379,7 @@ def run_sequencematch():
         scheduler.step()
 
         if ema is not None:
-            ema.update(model)
+            ema.update(base_model)
 
         mask_ratio.append(mask_w.mean().item())
 
