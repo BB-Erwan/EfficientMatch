@@ -20,6 +20,7 @@ sys.path.append("..")  # add parent directory to path for imports
 from datasets_utils import TransformedDataset, TransformedDatasetWithIndex
 from models import WideResNet
 from utils import evaluate_f1_and_accuracy
+from ema import EMA
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -67,6 +68,8 @@ parser.add_argument("--max_steps", type=int, default=2**20, help="Number of step
 parser.add_argument("--total_steps", type=int, default=2**20, help="Nominal horizon the cosine LR schedule decays over, independent of max_steps.")
 parser.add_argument("--verbose", type=str2bool, default=False)
 parser.add_argument("--target_acc", type=float, default=None, help="Stop the run early once test_acc reaches this value.")
+parser.add_argument("--use_ema", type=str2bool, default=False, help="Evaluate an EMA of the weights instead of the raw training weights.")
+parser.add_argument("--ema_decay", type=float, default=0.999)
 args = parser.parse_args()
 
 
@@ -178,6 +181,16 @@ def run_fixmatch():
     if optimized:
         model = model.to(memory_format=torch.channels_last)
     # ───────────────────────────────────────────────────────────────────────────
+
+    # --- EMA débrayable (use_ema=False -> évalue directement les poids en cours d'entraînement) ---
+    if args.use_ema:
+        eval_model = WideResNet(depth=28, widen_factor=2, num_classes=num_classes).to(device)
+        if optimized:
+            eval_model = eval_model.to(memory_format=torch.channels_last)
+        ema = EMA(model, args.ema_decay)
+    else:
+        eval_model = model
+        ema = None
 
     logger.info(f"Number of parameters: {sum(p.numel() for p in model.parameters()):,}")
 
@@ -304,12 +317,17 @@ def run_fixmatch():
         scheduler.step()
         # ─────────────────────────────────────────────────────────────────────
 
+        if ema is not None:
+            ema.update(model)
+
         # update pseudo_labels passing throught the mask to avoid updating pseudo_labels for low confidence samples
         pseudo_labels[idx] = torch.where(mask.bool().cpu(), pseudo.cpu(), pseudo_labels[idx])
         confidences[idx] = torch.where(mask.bool().cpu(), max_prob.cpu(), confidences[idx])
 
         if (step + 1) % test_period == 0 or step == 0 or step == max_steps - 1:
-            f1, acc = evaluate_f1_and_accuracy(model, test_loader, device)
+            if ema is not None:
+                ema.copy_to(eval_model)
+            f1, acc = evaluate_f1_and_accuracy(eval_model, test_loader, device)
             metrics["test_f1"].append(f1)
             metrics["test_acc"].append(acc)
             metrics["time_elapsed"].append(time.time() - start_time)
