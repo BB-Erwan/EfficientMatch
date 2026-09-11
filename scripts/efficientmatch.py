@@ -64,6 +64,8 @@ parser.add_argument("--optimized", type=str2bool, default=True)
 parser.add_argument("--seed", type=int, default=42)
 parser.add_argument("--test_period", type=int, default=500)
 parser.add_argument("--tau", type=float, default=0.95)
+parser.add_argument("--adaptive_threshold", type=str2bool, default=False, help="Use FlexMatch-style class-adaptive confidence thresholding (Curriculum Pseudo Labeling) instead of a fixed tau.")
+parser.add_argument("--thresh_warmup", type=str2bool, default=True, help="Only used when --adaptive_threshold is enabled: include still-unassigned samples in the per-class normalization during warmup.")
 parser.add_argument("--alpha", type=float, default=0.75)
 parser.add_argument("--T", type=float, default=0.5)
 parser.add_argument("--max_steps", type=int, default=2**20, help="Number of steps actually run; the run is truncated here.")
@@ -71,7 +73,7 @@ parser.add_argument("--total_steps", type=int, default=2**20, help="Nominal hori
 parser.add_argument("--lr_schedule", type=str, default="fixmatch_cosine", choices=["fixmatch_cosine", "cosine_annealing"], help="LR schedule: rescaled FixMatch cosine (default) or torch's classic CosineAnnealingLR.")
 parser.add_argument("--verbose", type=str2bool, default=False)
 parser.add_argument("--target_acc", type=float, default=None, help="Stop the run early once test_acc reaches this value.")
-parser.add_argument("--use_ema", type=str2bool, default=False, help="Evaluate an EMA of the weights instead of the raw training weights.")
+parser.add_argument("--use_ema", type=str2bool, default=True, help="Evaluate an EMA of the weights instead of the raw training weights.")
 parser.add_argument("--ema_decay", type=float, default=0.999)
 args = parser.parse_args()
 
@@ -205,7 +207,9 @@ def run_efficientmatch():
         except ImportError:
             pass
 
-    method_name = "efficientmatch" + ("_ema" if args.use_ema else "")
+    adaptive_threshold = args.adaptive_threshold
+    thresh_warmup = args.thresh_warmup
+    method_name = "efficientmatch" + ("_flex" if adaptive_threshold else "") + ("_ema" if args.use_ema else "")
     name_of_experiment = f"labeled-{num_labeled}-seed-{args.seed}"
 
     tau = args.tau
@@ -214,6 +218,10 @@ def run_efficientmatch():
         torch.tensor(alpha, device=device, dtype=torch.float32),
         torch.tensor(alpha, device=device, dtype=torch.float32),
     )
+
+    # --- Seuillage adaptatif débrayable (Curriculum Pseudo-Labeling, FlexMatch) ---
+    selected_label = torch.full((len(unlabeled_ds),), -1, dtype=torch.long, device=device)
+    classwise_acc = torch.zeros(num_classes, dtype=torch.float32, device=device)
 
     metrics = {
         "train_loss": [],
@@ -277,12 +285,37 @@ def run_efficientmatch():
             x_u_w = weak_transform(x_u).to(device)
             x_u_s = strong_transform(x_u).to(device)
 
+        idx_device = idx.to(device, non_blocking=optimized)
+
         with torch.no_grad():
             with autocast(device_type="cuda", dtype=torch.bfloat16):
                 logits_u_w = model(x_u_w)
             probs_u_w = F.softmax(logits_u_w.float(), dim=1)
             max_prob, pseudo = torch.max(probs_u_w, dim=1)
-            mask = max_prob.ge(tau).float()
+
+            if adaptive_threshold:
+                acc_per_sample = classwise_acc[pseudo]
+                flexible_thresh = tau * (acc_per_sample / (2.0 - acc_per_sample))
+                mask = max_prob.ge(flexible_thresh).float()
+                select = max_prob.ge(tau)
+
+                if select.any():
+                    selected_label[idx_device[select]] = pseudo[select]
+
+                counts = torch.bincount(selected_label[selected_label != -1] + 1, minlength=num_classes + 1)
+                if counts.max().item() < selected_label.shape[0]:
+                    counts_per_class = counts[1:].float()
+                    if thresh_warmup:
+                        denom = max(counts.max().item(), 1)
+                        classwise_acc = counts_per_class / denom
+                    else:
+                        wo_negative_one = counts.clone()
+                        wo_negative_one[0] = 0
+                        denom = max(wo_negative_one.max().item(), 1)
+                        classwise_acc = counts_per_class / denom
+            else:
+                mask = max_prob.ge(tau).float()
+
             mask_ratio.append(mask.mean().item())
 
         optimizer.zero_grad(set_to_none=True)
