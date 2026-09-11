@@ -59,6 +59,9 @@ def str2bool(v):
 
 
 parser = argparse.ArgumentParser()
+parser.add_argument("--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100", "svhn"])
+parser.add_argument("--widen_factor", type=int, default=2, help="WideResNet-28-{widen_factor}. Papers use 2 for CIFAR-10 and 8 for CIFAR-100.")
+parser.add_argument("--weight_decay", type=float, default=5e-4, help="SGD weight decay. Papers use 5e-4 for CIFAR-10 and 1e-3 for CIFAR-100.")
 parser.add_argument("--num_labeled", type=int, default=250)
 parser.add_argument("--optimized", type=str2bool, default=True)
 parser.add_argument("--seed", type=int, default=42)
@@ -82,19 +85,31 @@ def run_flexmatch():
     # ───────────────────────────────────────────────────────────────────────────
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    num_classes = 10
 
-    # Load the CIFAR-10 dataset
-    train_ds = torchvision.datasets.CIFAR10(root="./data", train=True, download=True)
-    test_ds = torchvision.datasets.CIFAR10(root="./data", train=False, download=True)
+    if args.dataset == "cifar100":
+        num_classes = 100
+        mean = torch.tensor([0.5071, 0.4865, 0.4409])
+        std = torch.tensor([0.2673, 0.2564, 0.2762])
+        train_ds = torchvision.datasets.CIFAR100(root="./data", train=True, download=True)
+        test_ds = torchvision.datasets.CIFAR100(root="./data", train=False, download=True)
+    elif args.dataset == "svhn":
+        num_classes = 10
+        mean = torch.tensor([0.4377, 0.4438, 0.4728])
+        std = torch.tensor([0.1980, 0.2010, 0.1970])
+        train_ds = torchvision.datasets.SVHN(root="./data", split="train", download=True)
+        test_ds = torchvision.datasets.SVHN(root="./data", split="test", download=True)
+    else:
+        num_classes = 10
+        mean = torch.tensor([0.4914, 0.4822, 0.4465])
+        std = torch.tensor([0.2470, 0.2435, 0.2616])
+        train_ds = torchvision.datasets.CIFAR10(root="./data", train=True, download=True)
+        test_ds = torchvision.datasets.CIFAR10(root="./data", train=False, download=True)
 
     logger.info(f"Training samples: {len(train_ds)}, Test samples: {len(test_ds)}")
     logger.info(f"Device: {device}")
     if torch.cuda.is_available():
         logger.info(f"GPU: {torch.cuda.get_device_name(0)}")
 
-    mean = torch.tensor([0.4914, 0.4822, 0.4465])
-    std = torch.tensor([0.2470, 0.2435, 0.2616])
     logger.info(f"Mean: {mean}, Std: {std}")
 
     num_labeled = args.num_labeled
@@ -104,11 +119,11 @@ def run_flexmatch():
     train_ds = Subset(train_ds, torch.randperm(len(train_ds)))
 
     # Split the training data into labeled and unlabeled datasets with balanced classes
-    num_per_class = num_labeled // 10
+    num_per_class = num_labeled // num_classes
     labeled_indices = []
     unlabeled_indices = []
 
-    for i in range(10):
+    for i in range(num_classes):
         class_indices = [j for j, (_, label) in enumerate(train_ds) if label == i]
         perm = torch.randperm(len(class_indices))
         labeled_indices.extend([class_indices[j] for j in perm[:num_per_class]])
@@ -171,7 +186,7 @@ def run_flexmatch():
         unlabeled_loader = DataLoader(unlabeled_ds, batch_size=batch_size_l * mu, shuffle=True)
         test_loader = DataLoader(test_ds, batch_size=256, shuffle=False)
 
-    model = WideResNet(depth=28, widen_factor=2, num_classes=num_classes)
+    model = WideResNet(depth=28, widen_factor=args.widen_factor, num_classes=num_classes)
 
     # ── Channels Last : layout NHWC optimal pour les Tensor Cores Ampere ───────
     model = model.to(device)
@@ -181,7 +196,7 @@ def run_flexmatch():
 
     # --- EMA débrayable (use_ema=False -> évalue directement les poids en cours d'entraînement) ---
     if args.use_ema:
-        eval_model = WideResNet(depth=28, widen_factor=2, num_classes=num_classes).to(device)
+        eval_model = WideResNet(depth=28, widen_factor=args.widen_factor, num_classes=num_classes).to(device)
         if optimized:
             eval_model = eval_model.to(memory_format=torch.channels_last)
         ema = EMA(model, args.ema_decay)
@@ -199,7 +214,7 @@ def run_flexmatch():
     max_steps = args.max_steps
     total_steps = args.total_steps
     optimizer = torch.optim.SGD(
-        model.parameters(), lr=0.03, momentum=0.9, weight_decay=5e-4, nesterov=True
+        model.parameters(), lr=0.03, momentum=0.9, weight_decay=args.weight_decay, nesterov=True
     )
     scheduler = build_lr_scheduler(optimizer, total_steps, schedule=args.lr_schedule)
 
@@ -215,7 +230,8 @@ def run_flexmatch():
     # -- Hyper-parameters FlexMatch ---------------------------------------------
     # tau=0.95 (confidence), mu=7 (unlabeled:labeled ratio), loss=Ls+Lu
     method_name = "flexmatch" + ("_ema" if args.use_ema else "")
-    name_of_experiment = f"labeled-{num_labeled}-seed-{args.seed}"
+    dataset_prefix = f"{args.dataset}-" if args.dataset != "cifar10" else ""
+    name_of_experiment = f"{dataset_prefix}labeled-{num_labeled}-seed-{args.seed}"
 
     metrics = {
         "train_loss": [],
