@@ -19,6 +19,23 @@ DERIVED_RATIOS = {
     "corrections_ratio": ("corrections", "bad_corrections"),
 }
 
+# FLOPs per training iteration (WideResNet-28-2, batch labellisé=64), depuis FLOPS_RESULTS.md /
+# `scripts/flops_analysis.py`. Utilisé pour tracer test_acc en fonction des FLOPs cumulés.
+FLOPS_PER_ITER = {
+    "efficientmatch": 7.404e11,
+    "fixmatch": 8.501e11,
+    "flexmatch": 8.501e11,
+    "mixmatch": 3.016e11,
+    "sequencematch": 1.810e12,
+}
+
+
+def infer_flops_per_iter(label):
+    for name, flops in FLOPS_PER_ITER.items():
+        if label.lower().startswith(name):
+            return flops
+    return None
+
 
 def load_metrics(metrics_path, test_period):
     with open(metrics_path) as f:
@@ -52,7 +69,7 @@ def print_summary_table(df):
     )
 
 
-def make_plots(df, output_dir, method_name):
+def make_plots(df, output_dir, method_name, flops_per_iter=None):
     os.makedirs(output_dir, exist_ok=True)
 
     cols = [c for c in TRACKED_METRICS if c in df.columns]
@@ -82,6 +99,18 @@ def make_plots(df, output_dir, method_name):
         plt.close(fig)
         logger.info(f"Saved {time_path}")
 
+    if flops_per_iter is not None:
+        fig, ax = plt.subplots(figsize=(6, 4))
+        ax.plot(df["step"] * flops_per_iter, df["test_acc"])
+        ax.set_title(f"{method_name} - test_acc vs FLOPs")
+        ax.set_xlabel("cumulative FLOPs")
+        ax.set_ylabel("test_acc")
+        fig.tight_layout()
+        flops_path = os.path.join(output_dir, f"{method_name}_acc_vs_flops.png")
+        fig.savefig(flops_path, dpi=150)
+        plt.close(fig)
+        logger.info(f"Saved {flops_path}")
+
 
 def print_comparison_table(runs):
     rows = []
@@ -103,7 +132,7 @@ def print_comparison_table(runs):
     return summary
 
 
-def make_comparison_plots(runs, output_dir):
+def make_comparison_plots(runs, output_dir, flops_per_iter=None):
     os.makedirs(output_dir, exist_ok=True)
 
     cols = [c for c in TRACKED_METRICS if all(c in df.columns for df in runs.values())]
@@ -137,6 +166,20 @@ def make_comparison_plots(runs, output_dir):
         plt.close(fig)
         logger.info(f"Saved {time_path}")
 
+    if flops_per_iter and all(name in flops_per_iter for name in runs):
+        fig, ax = plt.subplots(figsize=(8, 5))
+        for name, df in runs.items():
+            ax.plot(df["step"] * flops_per_iter[name], df["test_acc"], label=name)
+        ax.set_title("test_acc vs FLOPs")
+        ax.set_xlabel("cumulative FLOPs")
+        ax.set_ylabel("test_acc")
+        ax.legend()
+        fig.tight_layout()
+        flops_path = os.path.join(output_dir, "comparison_acc_vs_flops.png")
+        fig.savefig(flops_path, dpi=150)
+        plt.close(fig)
+        logger.info(f"Saved {flops_path}")
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -152,16 +195,20 @@ def main():
     labels = args.labels or [os.path.basename(p).replace("_metrics.json", "") for p in args.metrics_paths]
 
     runs = {}
+    flops_per_iter = {}
     for path, label in zip(args.metrics_paths, labels):
         df = load_metrics(path, args.test_period)
         runs[label] = df
+        label_flops = infer_flops_per_iter(label)
+        if label_flops is not None:
+            flops_per_iter[label] = label_flops
 
         output_dir = args.output_dir or os.path.join(os.path.dirname(path), "plots")
         os.makedirs(output_dir, exist_ok=True)
         csv_path = os.path.join(output_dir, f"{label}_metrics.csv")
         df.to_csv(csv_path, index=False)
         logger.info(f"Saved {csv_path}")
-        make_plots(df, output_dir, label)
+        make_plots(df, output_dir, label, flops_per_iter=label_flops)
 
     if len(runs) == 1:
         (df,) = runs.values()
@@ -173,7 +220,7 @@ def main():
         summary_path = os.path.join(comparison_dir, "comparison_summary.csv")
         summary.to_csv(summary_path, index=False)
         logger.info(f"Saved {summary_path}")
-        make_comparison_plots(runs, comparison_dir)
+        make_comparison_plots(runs, comparison_dir, flops_per_iter=flops_per_iter)
 
 
 if __name__ == "__main__":
