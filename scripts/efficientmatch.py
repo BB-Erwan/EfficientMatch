@@ -65,6 +65,7 @@ parser.add_argument("--seed", type=int, default=42)
 parser.add_argument("--test_period", type=int, default=500)
 parser.add_argument("--tau", type=float, default=0.95)
 parser.add_argument("--adaptive_threshold", type=str2bool, default=False, help="Use FlexMatch-style class-adaptive confidence thresholding (Curriculum Pseudo Labeling) instead of a fixed tau.")
+parser.add_argument("--mu", type=int, default=3, help="Unlabeled:labeled batch size ratio.")
 parser.add_argument("--thresh_warmup", type=str2bool, default=True, help="Only used when --adaptive_threshold is enabled: include still-unassigned samples in the per-class normalization during warmup.")
 parser.add_argument("--alpha", type=float, default=0.75)
 parser.add_argument("--T", type=float, default=0.5)
@@ -158,7 +159,7 @@ def run_efficientmatch():
     )
 
     batch_size_l = 64
-    mu = 3
+    mu = args.mu
 
     if optimized:
         labeled_loader = DataLoader(labeled_ds, batch_size=batch_size_l, shuffle=True, **dl_kwargs)
@@ -209,7 +210,7 @@ def run_efficientmatch():
 
     adaptive_threshold = args.adaptive_threshold
     thresh_warmup = args.thresh_warmup
-    method_name = "efficientmatch" + ("_flex" if adaptive_threshold else "") + ("_ema" if args.use_ema else "")
+    method_name = "efficientmatch" + ("_flex" if adaptive_threshold else "") + ("_ema" if args.use_ema else "") + (f"_mu{mu}" if mu != 3 else "")
     name_of_experiment = f"labeled-{num_labeled}-seed-{args.seed}"
 
     tau = args.tau
