@@ -215,7 +215,7 @@ def run_mixmatch():
             pass
 
     method_name = "mixmatch" + ("_ema" if args.use_ema else "")
-    dataset_prefix = f"{args.dataset}-" if args.dataset != "cifar10" else ""
+    dataset_prefix = f"{args.dataset}-"
     name_of_experiment = f"{dataset_prefix}labeled-{num_labeled}-seed-{args.seed}"
 
     metrics = {
@@ -245,7 +245,8 @@ def run_mixmatch():
     verbose = args.verbose
     target_acc = args.target_acc
 
-    results_dir = f"results/{name_of_experiment}"
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    results_dir = os.path.join(repo_root, "results", name_of_experiment)
     os.makedirs(results_dir, exist_ok=True)
     start_time = time.time()
     mask_ratio = []

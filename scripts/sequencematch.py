@@ -243,7 +243,7 @@ def run_sequencematch():
     use_flex = args.use_flex
 
     method_name = "sequencematch" + ("_ema" if args.use_ema else "")
-    dataset_prefix = f"{args.dataset}-" if args.dataset != "cifar10" else ""
+    dataset_prefix = f"{args.dataset}-"
     name_of_experiment = f"{dataset_prefix}labeled-{num_labeled}-seed-{args.seed}"
 
     metrics = {
@@ -272,7 +272,8 @@ def run_sequencematch():
     test_period = args.test_period
     verbose = args.verbose
 
-    results_dir = f"results/{name_of_experiment}"
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    results_dir = os.path.join(repo_root, "results", name_of_experiment)
     os.makedirs(results_dir, exist_ok=True)
 
     N_unlabeled = len(unlabeled_ds)

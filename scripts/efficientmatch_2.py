@@ -67,7 +67,11 @@ parser.add_argument("--optimized", type=str2bool, default=True)
 parser.add_argument("--seed", type=int, default=42)
 parser.add_argument("--test_period", type=int, default=500)
 parser.add_argument("--tau", type=float, default=0.95)
-parser.add_argument("--thresh_warmup", type=str2bool, default=True)
+parser.add_argument("--adaptive_threshold", type=str2bool, default=False, help="Use FlexMatch-style class-adaptive confidence thresholding (Curriculum Pseudo Labeling) instead of a fixed tau.")
+parser.add_argument("--mu", type=int, default=3, help="Unlabeled:labeled batch size ratio.")
+parser.add_argument("--thresh_warmup", type=str2bool, default=True, help="Only used when --adaptive_threshold is enabled: include still-unassigned samples in the per-class normalization during warmup.")
+parser.add_argument("--alpha", type=float, default=0.75)
+parser.add_argument("--T", type=float, default=0.5)
 parser.add_argument("--max_steps", type=int, default=2**20, help="Number of steps actually run; the run is truncated here.")
 parser.add_argument("--total_steps", type=int, default=2**20, help="Nominal horizon the cosine LR schedule decays over, independent of max_steps.")
 parser.add_argument("--lr_schedule", type=str, default="fixmatch_cosine", choices=["fixmatch_cosine", "cosine_annealing"], help="LR schedule: rescaled FixMatch cosine (default) or torch's classic CosineAnnealingLR.")
@@ -78,10 +82,10 @@ parser.add_argument("--ema_decay", type=float, default=0.999)
 args = parser.parse_args()
 
 
-def run_flexmatch():
+def run_efficientmatch():
     # ── Optimisations globales ──────────────────────────────────────────────────
-    torch.backends.cudnn.benchmark = True  # Sélectionne l'algo cuDNN le plus rapide
-    torch.set_float32_matmul_precision("high")  # TF32 sur Ampere (A4000) — matmul plus rapide
+    torch.backends.cudnn.benchmark = True
+    torch.set_float32_matmul_precision("high")
     # ───────────────────────────────────────────────────────────────────────────
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -115,10 +119,9 @@ def run_flexmatch():
     num_labeled = args.num_labeled
     optimized = args.optimized
     torch.manual_seed(args.seed)
-    # do a randperm on the training dataset to shuffle it
+
     train_ds = Subset(train_ds, torch.randperm(len(train_ds)))
 
-    # Split the training data into labeled and unlabeled datasets with balanced classes
     num_per_class = num_labeled // num_classes
     labeled_indices = []
     unlabeled_indices = []
@@ -132,7 +135,6 @@ def run_flexmatch():
     labeled_ds = Subset(train_ds, labeled_indices)
     unlabeled_ds = Subset(train_ds, unlabeled_indices)
 
-    # check class distribution in labeled dataset
     labeled_class_counts = torch.zeros(num_classes)
     for _, label in labeled_ds:
         labeled_class_counts[label] += 1
@@ -140,7 +142,7 @@ def run_flexmatch():
 
     norm_transform = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize(mean, std)
+        transforms.Normalize(mean, std),
     ])
 
     weak_transform = v2.Compose([
@@ -164,18 +166,16 @@ def run_flexmatch():
     unlabeled_ds = TransformedDatasetWithIndex(unlabeled_ds, transform=transforms.ToTensor())
     test_ds = TransformedDataset(test_ds, norm_transform)
 
-    # ── DataLoader optimisé ────────────────────────────────────────────────────
-    num_workers = min(2, os.cpu_count())  # ~2× CPU physiques
+    num_workers = min(2, os.cpu_count())
     dl_kwargs = dict(
         num_workers=num_workers,
-        pin_memory=True,  # transfert CPU→GPU DMA (plus rapide)
-        prefetch_factor=4,  # pré-charge les batchs en avance
-        persistent_workers=True,  # évite de respawn les workers à chaque epoch
+        pin_memory=True,
+        prefetch_factor=4,
+        persistent_workers=True,
     )
-    # ───────────────────────────────────────────────────────────────────────────
 
     batch_size_l = 64
-    mu = 7
+    mu = args.mu
 
     if optimized:
         labeled_loader = DataLoader(labeled_ds, batch_size=batch_size_l, shuffle=True, **dl_kwargs)
@@ -187,12 +187,9 @@ def run_flexmatch():
         test_loader = DataLoader(test_ds, batch_size=256, shuffle=False)
 
     model = WideResNet(depth=28, widen_factor=args.widen_factor, num_classes=num_classes)
-
-    # ── Channels Last : layout NHWC optimal pour les Tensor Cores Ampere ───────
     model = model.to(device)
     if optimized:
         model = model.to(memory_format=torch.channels_last)
-    # ───────────────────────────────────────────────────────────────────────────
 
     # --- EMA débrayable (use_ema=False -> évalue directement les poids en cours d'entraînement) ---
     if args.use_ema:
@@ -227,11 +224,22 @@ def run_flexmatch():
         except ImportError:
             pass
 
-    # -- Hyper-parameters FlexMatch ---------------------------------------------
-    # tau=0.95 (confidence), mu=7 (unlabeled:labeled ratio), loss=Ls+Lu
-    method_name = "flexmatch" + ("_ema" if args.use_ema else "")
+    adaptive_threshold = args.adaptive_threshold
+    thresh_warmup = args.thresh_warmup
+    method_name = "efficientmatch_2" + ("_flex" if adaptive_threshold else "") + ("_ema" if args.use_ema else "") + (f"_mu{mu}" if mu != 3 else "")
     dataset_prefix = f"{args.dataset}-"
     name_of_experiment = f"{dataset_prefix}labeled-{num_labeled}-seed-{args.seed}"
+
+    tau = args.tau
+    alpha = args.alpha
+    beta_dist = torch.distributions.Beta(
+        torch.tensor(alpha, device=device, dtype=torch.float32),
+        torch.tensor(alpha, device=device, dtype=torch.float32),
+    )
+
+    # --- Seuillage adaptatif débrayable (Curriculum Pseudo-Labeling, FlexMatch) ---
+    selected_label = torch.full((len(unlabeled_ds),), -1, dtype=torch.long, device=device)
+    classwise_acc = torch.zeros(num_classes, dtype=torch.float32, device=device)
 
     metrics = {
         "train_loss": [],
@@ -256,12 +264,6 @@ def run_flexmatch():
     pseudo_labels = torch.full((len(unlabeled_ds),), -1, dtype=torch.long)
     confidences = torch.zeros(len(unlabeled_ds), dtype=torch.float32)
 
-    tau = args.tau
-    thresh_warmup = args.thresh_warmup
-
-    selected_label = torch.full((len(unlabeled_ds),), -1, dtype=torch.long, device=device)
-    classwise_acc = torch.zeros(num_classes, dtype=torch.float32, device=device)
-
     test_period = args.test_period
     verbose = args.verbose
     target_acc = args.target_acc
@@ -272,7 +274,6 @@ def run_flexmatch():
     start_time = time.time()
     mask_ratio = []
     losses = []
-    use_cuda_autocast = optimized and device.type == "cuda"
 
     labeled_iter = iter(labeled_loader)
     unlabeled_iter = iter(unlabeled_loader)
@@ -292,9 +293,6 @@ def run_flexmatch():
             unlabeled_iter = iter(unlabeled_loader)
             x_u, y_u, idx = next(unlabeled_iter)
 
-        idx = idx.to(device, non_blocking=optimized)
-
-        # Channels Last sur les inputs
         if optimized:
             x_l = weak_transform(x_l).to(device, non_blocking=True, memory_format=torch.channels_last)
             y_l = y_l.to(device, non_blocking=True)
@@ -306,47 +304,95 @@ def run_flexmatch():
             x_u_w = weak_transform(x_u).to(device)
             x_u_s = strong_transform(x_u).to(device)
 
-        # ── Pseudo-labels + masque CPL (tout inline) ─────────────────────────────
+        idx_device = idx.to(device, non_blocking=optimized)
+
         with torch.no_grad():
-            pseudo_ctx = autocast(device_type="cuda", dtype=torch.bfloat16) if use_cuda_autocast else nullcontext()
-            with pseudo_ctx:
+            with autocast(device_type="cuda", dtype=torch.bfloat16):
                 logits_u_w = model(x_u_w)
             probs_u_w = F.softmax(logits_u_w.float(), dim=1)
-            max_probs, pseudo = torch.max(probs_u_w, dim=-1)
-            acc_per_sample = classwise_acc[pseudo]
-            flexible_thresh = tau * (acc_per_sample / (2.0 - acc_per_sample))
-            mask = max_probs.ge(flexible_thresh).float()
-            select = max_probs.ge(tau)
+            max_prob, pseudo = torch.max(probs_u_w, dim=1)
 
-            if select.any():
-                selected_label[idx[select]] = pseudo[select]
+            if adaptive_threshold:
+                acc_per_sample = classwise_acc[pseudo]
+                flexible_thresh = tau * (acc_per_sample / (2.0 - acc_per_sample))
+                mask = max_prob.ge(flexible_thresh).float()
+                select = max_prob.ge(tau)
 
-            counts = torch.bincount(selected_label[selected_label != -1] + 1, minlength=num_classes + 1)
-            if counts.max().item() < selected_label.shape[0]:
-                counts_per_class = counts[1:].float()
-                if thresh_warmup:
-                    denom = max(counts.max().item(), 1)
-                    classwise_acc = counts_per_class / denom
-                else:
-                    wo_negative_one = counts.clone()
-                    wo_negative_one[0] = 0
-                    denom = max(wo_negative_one.max().item(), 1)
-                    classwise_acc = counts_per_class / denom
+                if select.any():
+                    selected_label[idx_device[select]] = pseudo[select]
+
+                counts = torch.bincount(selected_label[selected_label != -1] + 1, minlength=num_classes + 1)
+                if counts.max().item() < selected_label.shape[0]:
+                    counts_per_class = counts[1:].float()
+                    if thresh_warmup:
+                        denom = max(counts.max().item(), 1)
+                        classwise_acc = counts_per_class / denom
+                    else:
+                        wo_negative_one = counts.clone()
+                        wo_negative_one[0] = 0
+                        denom = max(wo_negative_one.max().item(), 1)
+                        classwise_acc = counts_per_class / denom
+            else:
+                mask = max_prob.ge(tau).float()
 
             mask_ratio.append(mask.mean().item())
 
         optimizer.zero_grad(set_to_none=True)
 
-        train_ctx = autocast(device_type="cuda", dtype=torch.bfloat16) if use_cuda_autocast else nullcontext()
-        with train_ctx:
+        with autocast(device_type="cuda", dtype=torch.bfloat16) if optimized else nullcontext():
             batch_size_l_cur = x_l.shape[0]
             all_logits = model(torch.cat([x_l, x_u_s], dim=0))
             logits_l = all_logits[:batch_size_l_cur]
             logits_u_s = all_logits[batch_size_l_cur:]
 
             loss_supervised = F.cross_entropy(logits_l, y_l)
-            loss_consistency = (mask * F.cross_entropy(logits_u_s, pseudo, reduction="none")).mean()
-            loss = loss_supervised + loss_consistency
+            loss_consistency = (
+                mask * F.cross_entropy(logits_u_s, pseudo, reduction="none")
+            ).mean()
+
+            all_inputs = torch.cat([x_l, x_u_w], dim=0)
+            all_targets = torch.cat(
+                [
+                    F.one_hot(y_l, num_classes=num_classes).float(),
+                    F.one_hot(pseudo, num_classes=num_classes).float(),
+                ],
+                dim=0,
+            )
+            all_masks = torch.cat([torch.ones(batch_size_l_cur, device=device), mask], dim=0)
+
+            indices = torch.randperm(all_inputs.size(0), device=all_inputs.device)
+            all_inputs = all_inputs[indices]
+            all_targets = all_targets[indices]
+            all_masks = all_masks[indices]
+
+            lam_x = beta_dist.sample((batch_size_l_cur,))
+            lam_u = beta_dist.sample((x_u_w.size(0),))
+            lam_x = torch.maximum(lam_x, 1 - lam_x)
+            lam_u = torch.maximum(lam_u, 1 - lam_u)
+
+            lam_x_img = lam_x.view(-1, 1, 1, 1)
+            lam_u_img = lam_u.view(-1, 1, 1, 1)
+            lam_x_lbl = lam_x.view(-1, 1)
+            lam_u_lbl = lam_u.view(-1, 1)
+
+            mixup_x = torch.lerp(all_inputs[:batch_size_l_cur], x_l, lam_x_img)
+            mixup_u = torch.lerp(all_inputs[batch_size_l_cur:], x_u_w, lam_u_img)
+
+            mixup_targets_x = torch.lerp(all_targets[:batch_size_l_cur], F.one_hot(y_l, num_classes=num_classes).float(), lam_x_lbl)
+            mixup_targets_u = torch.lerp(all_targets[batch_size_l_cur:], F.one_hot(pseudo, num_classes=num_classes).float(), lam_u_lbl)
+
+            all_mixup_inputs = torch.cat([mixup_x, mixup_u], dim=0)
+            all_logits = model(all_mixup_inputs)
+            # logits_l_mixup = all_logits[:batch_size_l_cur]
+            # logits_u_mixup = all_logits[batch_size_l_cur:]
+
+            all_mixup_targets = torch.cat([mixup_targets_x, mixup_targets_u], dim=0)
+
+            loss_mixup = (
+                all_masks * F.cross_entropy(all_logits, all_mixup_targets.argmax(dim=1), reduction="none")
+            ).mean()
+            loss = loss_supervised + loss_consistency + loss_mixup
+
             losses.append(loss.item())
 
         loss.backward()
@@ -356,12 +402,8 @@ def run_flexmatch():
         if ema is not None:
             ema.update(base_model)
 
-        idx_cpu = idx.cpu()
-        mask_cpu = mask.to(dtype=torch.bool, device="cpu")
-        pseudo_cpu = pseudo.cpu()
-        max_probs_cpu = max_probs.cpu()
-        pseudo_labels[idx_cpu] = torch.where(mask_cpu, pseudo_cpu, pseudo_labels[idx_cpu])
-        confidences[idx_cpu] = torch.where(mask_cpu, max_probs_cpu, confidences[idx_cpu])
+        pseudo_labels[idx] = torch.where(mask.bool().cpu(), pseudo.cpu(), pseudo_labels[idx])
+        confidences[idx] = torch.where(mask.bool().cpu(), max_prob.cpu(), confidences[idx])
 
         if (step + 1) % test_period == 0 or step == 0 or step == max_steps - 1:
             if ema is not None:
@@ -370,8 +412,8 @@ def run_flexmatch():
             metrics["test_f1"].append(f1)
             metrics["test_acc"].append(acc)
             metrics["time_elapsed"].append(time.time() - start_time)
-            metrics["mask_ratio"].append(float(np.mean(mask_ratio)) if mask_ratio else 0.0)
-            metrics["train_loss"].append(float(np.mean(losses)) if losses else 0.0)
+            metrics["mask_ratio"].append(np.mean(mask_ratio))
+            metrics["train_loss"].append(np.mean(losses))
             mask_ratio = []
             losses = []
 
@@ -403,7 +445,7 @@ def run_flexmatch():
         elif verbose:
             print(
                 f"Step {step + 1}/{max_steps}, Loss: {loss.item():.4f}, "
-                f"Sup: {loss_supervised.item():.4f}, Cons: {loss_consistency.item():.4f}, "
+                f"Sup: {loss_supervised.item():.4f}, Cons: {loss_consistency.item():.4f}, Mixup: {loss_mixup.item():.4f}, "
                 f"Mask Ratio: {mask_ratio[-1]:.4f}",
                 end="\r",
                 flush=True,
@@ -411,4 +453,4 @@ def run_flexmatch():
 
 
 if __name__ == "__main__":
-    run_flexmatch()
+    run_efficientmatch()
