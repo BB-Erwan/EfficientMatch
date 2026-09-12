@@ -1,4 +1,7 @@
-"""WideResNet, architecture standard FixMatch (Oliver et al. protocol)."""
+"""WideResNet, architecture standard FixMatch (Oliver et al. protocol).
+DenseNet-BC pour CIFAR (Huang et al., 2016), adaptée pour images 32x32."""
+import math
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -56,3 +59,99 @@ class WideResNet(nn.Module):
         out = self.relu(self.bn1(out))
         out = F.adaptive_avg_pool2d(out, 1).flatten(1)
         return self.fc(out)
+
+
+class BottleneckLayer(nn.Module):
+    """Couche dense avec bottleneck : BN-ReLU-Conv1x1(4k) -> BN-ReLU-Conv3x3(k)"""
+
+    def __init__(self, in_channels, growth_rate):
+        super().__init__()
+        inter_channels = 4 * growth_rate
+        self.bn1 = nn.BatchNorm2d(in_channels)
+        self.conv1 = nn.Conv2d(in_channels, inter_channels, kernel_size=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(inter_channels)
+        self.conv2 = nn.Conv2d(inter_channels, growth_rate, kernel_size=3, padding=1, bias=False)
+
+    def forward(self, x):
+        out = self.conv1(F.relu(self.bn1(x)))
+        out = self.conv2(F.relu(self.bn2(out)))
+        return torch.cat([x, out], dim=1)
+
+
+class TransitionLayer(nn.Module):
+    """Compression entre les dense blocks : BN-ReLU-Conv1x1 -> AvgPool2x2"""
+
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.bn = nn.BatchNorm2d(in_channels)
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False)
+
+    def forward(self, x):
+        out = self.conv(F.relu(self.bn(x)))
+        return F.avg_pool2d(out, 2)
+
+
+class DenseNetCIFAR(nn.Module):
+    def __init__(self, depth=100, growth_rate=12, reduction=0.5, num_classes=100):
+        super().__init__()
+        assert (depth - 4) % 6 == 0, "depth doit vérifier (depth-4) % 6 == 0 pour DenseNet-BC"
+        n_layers_per_block = (depth - 4) // 6
+
+        num_channels = 2 * growth_rate
+        self.conv1 = nn.Conv2d(3, num_channels, kernel_size=3, padding=1, bias=False)
+
+        def make_dense_block(in_channels, n_layers):
+            layers = []
+            for i in range(n_layers):
+                layers.append(BottleneckLayer(in_channels + i * growth_rate, growth_rate))
+            return nn.Sequential(*layers), in_channels + n_layers * growth_rate
+
+        self.block1, num_channels = make_dense_block(num_channels, n_layers_per_block)
+        out_channels = int(math.floor(num_channels * reduction))
+        self.trans1 = TransitionLayer(num_channels, out_channels)
+        num_channels = out_channels
+
+        self.block2, num_channels = make_dense_block(num_channels, n_layers_per_block)
+        out_channels = int(math.floor(num_channels * reduction))
+        self.trans2 = TransitionLayer(num_channels, out_channels)
+        num_channels = out_channels
+
+        self.block3, num_channels = make_dense_block(num_channels, n_layers_per_block)
+
+        self.bn_final = nn.BatchNorm2d(num_channels)
+        self.fc = nn.Linear(num_channels, num_classes)
+
+        self._init_weights()
+
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.constant_(m.bias, 0)
+
+    def forward(self, x):
+        out = self.conv1(x)
+        out = self.trans1(self.block1(out))
+        out = self.trans2(self.block2(out))
+        out = self.block3(out)
+        out = F.relu(self.bn_final(out))
+        out = F.adaptive_avg_pool2d(out, 1).flatten(1)
+        return self.fc(out)
+
+
+def densenet_bc_100_12(num_classes=100):
+    """Config du papier original (L=100, k=12), ~0.8M paramètres."""
+    return DenseNetCIFAR(depth=100, growth_rate=12, reduction=0.5, num_classes=num_classes)
+
+
+def build_model(model_name, num_classes, widen_factor=2):
+    """Factory commune aux scripts d'expérience : instancie le backbone choisi via --model."""
+    if model_name == "wideresnet":
+        return WideResNet(depth=28, widen_factor=widen_factor, num_classes=num_classes)
+    elif model_name == "densenet":
+        return densenet_bc_100_12(num_classes=num_classes)
+    raise ValueError(f"Unknown model: {model_name}")

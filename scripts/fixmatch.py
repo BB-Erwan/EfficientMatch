@@ -18,7 +18,7 @@ from torchvision.transforms import v2
 sys.path.append("..")  # add parent directory to path for imports
 
 from datasets_utils import TransformedDataset, TransformedDatasetWithIndex
-from models import WideResNet
+from models import WideResNet, build_model
 from utils import evaluate_f1_and_accuracy, build_lr_scheduler
 from ema import EMA
 
@@ -61,6 +61,7 @@ def str2bool(v):
 parser = argparse.ArgumentParser()
 parser.add_argument("--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100", "svhn"])
 parser.add_argument("--widen_factor", type=int, default=2, help="WideResNet-28-{widen_factor}. Papers use 2 for CIFAR-10 and 8 for CIFAR-100.")
+parser.add_argument("--model", type=str, default="wideresnet", choices=["wideresnet", "densenet"], help="Backbone architecture.")
 parser.add_argument("--weight_decay", type=float, default=5e-4, help="SGD weight decay. Papers use 5e-4 for CIFAR-10 and 1e-3 for CIFAR-100.")
 parser.add_argument("--num_labeled", type=int, default=250)
 parser.add_argument("--optimized", type=str2bool, default=True)
@@ -190,7 +191,7 @@ def run_fixmatch():
         unlabeled_loader = DataLoader(unlabeled_ds, batch_size=batch_size_l * mu, shuffle=True)
         test_loader = DataLoader(test_ds, batch_size=256, shuffle=False)
 
-    model = WideResNet(depth=28, widen_factor=args.widen_factor, num_classes=num_classes)
+    model = build_model(args.model, num_classes, args.widen_factor)
 
     # ── Channels Last : layout NHWC optimal pour les Tensor Cores Ampere ───────
     model = model.to(device)
@@ -200,7 +201,7 @@ def run_fixmatch():
 
     # --- EMA débrayable (use_ema=False -> évalue directement les poids en cours d'entraînement) ---
     if args.use_ema:
-        eval_model = WideResNet(depth=28, widen_factor=args.widen_factor, num_classes=num_classes).to(device)
+        eval_model = build_model(args.model, num_classes, args.widen_factor).to(device)
         if optimized:
             eval_model = eval_model.to(memory_format=torch.channels_last)
         ema = EMA(model, args.ema_decay)
