@@ -61,7 +61,9 @@ def str2bool(v):
 parser = argparse.ArgumentParser()
 parser.add_argument("--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100", "svhn"])
 parser.add_argument("--widen_factor", type=int, default=2, help="WideResNet-28-{widen_factor}. Papers use 2 for CIFAR-10 and 8 for CIFAR-100.")
-parser.add_argument("--model", type=str, default="wideresnet", choices=["wideresnet", "densenet"], help="Backbone architecture.")
+parser.add_argument("--model", type=str, default="wideresnet", choices=["wideresnet", "resnet18"], help="Backbone architecture.")
+parser.add_argument("--depth", type=int, default=28, help="WideResNet depth (e.g. 28 for WRN-28-x, 40 for WRN-40-x). Ignored for resnet18. Must satisfy (depth-4) mod 6 == 0.")
+parser.add_argument("--topk", type=int, default=1, help="Also report top-k accuracy for every k from 1 to this value (e.g. --topk 3 logs Top-1, Top-2 and Top-3).")
 parser.add_argument("--weight_decay", type=float, default=5e-4, help="SGD weight decay. Papers use 5e-4 for CIFAR-10 and 1e-3 for CIFAR-100.")
 parser.add_argument("--num_labeled", type=int, default=250)
 parser.add_argument("--optimized", type=str2bool, default=True)
@@ -177,14 +179,14 @@ def run_mixmatch():
         unlabeled_loader = DataLoader(unlabeled_ds, batch_size=batch_size_l * mu, shuffle=True)
         test_loader = DataLoader(test_ds, batch_size=256, shuffle=False)
 
-    model = build_model(args.model, num_classes, args.widen_factor)
+    model = build_model(args.model, num_classes, args.widen_factor, args.depth)
     model = model.to(device)
     if optimized:
         model = model.to(memory_format=torch.channels_last)
 
     # --- EMA débrayable (use_ema=False -> évalue directement les poids en cours d'entraînement) ---
     if args.use_ema:
-        eval_model = build_model(args.model, num_classes, args.widen_factor).to(device)
+        eval_model = build_model(args.model, num_classes, args.widen_factor, args.depth).to(device)
         if optimized:
             eval_model = eval_model.to(memory_format=torch.channels_last)
         ema = EMA(model, args.ema_decay)
@@ -220,6 +222,7 @@ def run_mixmatch():
     name_of_experiment = f"{dataset_prefix}labeled-{num_labeled}-seed-{args.seed}"
 
     metrics = {
+        "step": [],
         "train_loss": [],
         "test_f1": [],
         "test_acc": [],
@@ -233,6 +236,7 @@ def run_mixmatch():
         "new_label": [],
         "new_correct": [],
         "bad_corrections": [],
+        "topk_acc": [],
     }
 
     last_pseudo_labels = torch.full((len(unlabeled_ds),), -1, dtype=torch.long)
@@ -361,12 +365,14 @@ def run_mixmatch():
         if (step + 1) % test_period == 0 or step == 0 or step == max_steps - 1:
             if ema is not None:
                 ema.copy_to(eval_model)
-            f1, acc = evaluate_f1_and_accuracy(eval_model, test_loader, device=device)
+            f1, acc, topk_accs = evaluate_f1_and_accuracy(eval_model, test_loader, device=device, topk=args.topk)
+            metrics["step"].append(step + 1)
             metrics["test_f1"].append(f1)
             metrics["test_acc"].append(acc)
             metrics["time_elapsed"].append(time.time() - start_time)
             metrics["mask_ratio"].append(float(np.mean(mask_ratio)) if mask_ratio else 0.0)
             metrics["train_loss"].append(float(np.mean(losses + [loss.item()])))
+            metrics["topk_acc"].append(topk_accs)
             mask_ratio = []
             losses = []
 
@@ -385,8 +391,9 @@ def run_mixmatch():
             if verbose:
                 # clear the in-place step line before logging the test-phase summary
                 print()
+            topk_str = " ".join(f"Top-{k}: {v:.4f}," for k, v in enumerate(topk_accs, start=1)) if args.topk > 1 else ""
             logger.info(
-                f"Test F1: {f1:.4f}, Acc: {acc:.4f}, PL Quality: {pl_metrics['pl_quality']:.4f}, "
+                f"Test F1: {f1:.4f}, Acc: {acc:.4f}, {topk_str} PL Quality: {pl_metrics['pl_quality']:.4f}, "
                 f"Mask Ratio: {metrics['mask_ratio'][-1]:.4f}, Error Reinforcement: {pl_metrics['error_reinforcement']}, Correct Reinforcement: {pl_metrics['correct_reinforcement']}, "
                 f"Corrections: {pl_metrics['corrections']}, Bad Corrections: {pl_metrics['bad_corrections']}, New Errors: {pl_metrics['new_errors']}, New Correct: {pl_metrics['new_correct']}, Loss: {metrics['train_loss'][-1]:.4f}, "
                 f"Time: {metrics['time_elapsed'][-1]:.2f}s"

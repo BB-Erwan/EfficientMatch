@@ -3,6 +3,7 @@ DenseNet-BC pour CIFAR (Huang et al., 2016), adaptée pour images 32x32."""
 import math
 import torch
 import torch.nn as nn
+import torchvision.models as models
 import torch.nn.functional as F
 
 
@@ -148,10 +149,17 @@ def densenet_bc_100_12(num_classes=100):
     return DenseNetCIFAR(depth=100, growth_rate=12, reduction=0.5, num_classes=num_classes)
 
 
-def build_model(model_name, num_classes, widen_factor=2):
-    """Factory commune aux scripts d'expérience : instancie le backbone choisi via --model."""
+def build_model(model_name, num_classes, widen_factor=2, depth=28):
+    """Factory commune aux scripts d'expérience : instancie le backbone choisi via --model.
+    depth ne s'applique qu'à wideresnet (ex: 28 pour WRN-28-x, 40 pour WRN-40-x)."""
     if model_name == "wideresnet":
-        return WideResNet(depth=28, widen_factor=widen_factor, num_classes=num_classes)
-    elif model_name == "densenet":
-        return densenet_bc_100_12(num_classes=num_classes)
+        return WideResNet(depth=depth, widen_factor=widen_factor, num_classes=num_classes)
+    elif model_name == "resnet18":
+        return resnet18_cifar(num_classes=num_classes)
     raise ValueError(f"Unknown model: {model_name}")
+
+def resnet18_cifar(num_classes=100):
+    model = models.resnet18(num_classes=num_classes)
+    model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+    model.maxpool = nn.Identity()
+    return model

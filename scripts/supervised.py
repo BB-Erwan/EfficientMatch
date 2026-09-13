@@ -38,8 +38,10 @@ def str2bool(v):
 
 parser = argparse.ArgumentParser(description="Fully-supervised baseline (full labeled training set, no pseudo-labeling) to benchmark a backbone's raw classification ceiling.")
 parser.add_argument("--dataset", type=str, default="cifar100", choices=["cifar10", "cifar100", "svhn"])
-parser.add_argument("--widen_factor", type=int, default=8, help="WideResNet-28-{widen_factor}. Papers use 2 for CIFAR-10 and 8 for CIFAR-100.")
-parser.add_argument("--model", type=str, default="densenet", choices=["wideresnet", "densenet"], help="Backbone architecture.")
+parser.add_argument("--widen_factor", type=int, default=2, help="WideResNet-28-{widen_factor}. Papers use 2 for CIFAR-10 and 8 for CIFAR-100.")
+parser.add_argument("--model", type=str, default="resnet18", choices=["wideresnet", "resnet18"], help="Backbone architecture.")
+parser.add_argument("--depth", type=int, default=28, help="WideResNet depth (e.g. 28 for WRN-28-x, 40 for WRN-40-x). Ignored for resnet18. Must satisfy (depth-4) mod 6 == 0.")
+parser.add_argument("--topk", type=int, default=1, help="Also report top-k accuracy for every k from 1 to this value (e.g. --topk 3 logs Top-1, Top-2 and Top-3).")
 parser.add_argument("--weight_decay", type=float, default=1e-3, help="SGD weight decay. Papers use 5e-4 for CIFAR-10 and 1e-3 for CIFAR-100.")
 parser.add_argument("--batch_size", type=int, default=128)
 parser.add_argument("--lr", type=float, default=0.1, help="Base SGD learning rate for the supervised baseline.")
@@ -127,7 +129,7 @@ def run_supervised():
         train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
         test_loader = DataLoader(test_ds, batch_size=256, shuffle=False)
 
-    model = build_model(args.model, num_classes, args.widen_factor)
+    model = build_model(args.model, num_classes, args.widen_factor, args.depth)
 
     # ── Channels Last : layout NHWC optimal pour les Tensor Cores Ampere ───────
     model = model.to(device)
@@ -137,7 +139,7 @@ def run_supervised():
 
     # --- EMA débrayable (use_ema=False -> évalue directement les poids en cours d'entraînement) ---
     if args.use_ema:
-        eval_model = build_model(args.model, num_classes, args.widen_factor).to(device)
+        eval_model = build_model(args.model, num_classes, args.widen_factor, args.depth).to(device)
         if optimized:
             eval_model = eval_model.to(memory_format=torch.channels_last)
         ema = EMA(model, args.ema_decay)
@@ -175,10 +177,12 @@ def run_supervised():
     name_of_experiment = f"{dataset_prefix}supervised-seed-{args.seed}"
 
     metrics = {
+        "step": [],
         "train_loss": [],
         "test_f1": [],
         "test_acc": [],
         "time_elapsed": [],
+        "topk_acc": [],
     }
 
     test_period = args.test_period
@@ -227,11 +231,13 @@ def run_supervised():
         if (step + 1) % test_period == 0 or step == 0 or step == max_steps - 1:
             if ema is not None:
                 ema.copy_to(eval_model)
-            f1, acc = evaluate_f1_and_accuracy(eval_model, test_loader, device)
+            f1, acc, topk_accs = evaluate_f1_and_accuracy(eval_model, test_loader, device, args.topk)
+            metrics["step"].append(step + 1)
             metrics["test_f1"].append(f1)
             metrics["test_acc"].append(acc)
             metrics["time_elapsed"].append(time.time() - start_time)
             metrics["train_loss"].append(np.mean(losses))
+            metrics["topk_acc"].append(topk_accs)
             losses = []
 
             with open(f"{results_dir}/{method_name}_metrics.json", "w") as f:
@@ -240,8 +246,9 @@ def run_supervised():
             if verbose:
                 # clear the in-place step line before logging the test-phase summary
                 print()
+            topk_str = " ".join(f"Top-{k}: {v:.4f}," for k, v in enumerate(topk_accs, start=1)) if args.topk > 1 else ""
             logger.info(
-                f"Test F1: {f1:.4f}, Acc: {acc:.4f}, Loss: {metrics['train_loss'][-1]:.4f}, "
+                f"Test F1: {f1:.4f}, Acc: {acc:.4f}, {topk_str} Loss: {metrics['train_loss'][-1]:.4f}, "
                 f"Time: {metrics['time_elapsed'][-1]:.2f}s"
             )
 
