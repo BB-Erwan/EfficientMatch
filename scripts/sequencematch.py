@@ -67,7 +67,7 @@ parser.add_argument("--topk", type=int, default=1, help="Also report top-k accur
 parser.add_argument("--weight_decay", type=float, default=5e-4, help="SGD weight decay. Papers use 5e-4 for CIFAR-10 and 1e-3 for CIFAR-100.")
 parser.add_argument("--num_labeled", type=int, default=250)
 parser.add_argument("--optimized", type=str2bool, default=True)
-parser.add_argument("--seed", type=int, default=0)
+parser.add_argument("--seed", type=int, default=42)
 parser.add_argument("--test_period", type=int, default=500)
 parser.add_argument("--tau", type=float, default=0.95)
 parser.add_argument("--T", type=float, default=0.5)
@@ -78,6 +78,7 @@ parser.add_argument("--max_steps", type=int, default=2**20, help="Number of step
 parser.add_argument("--total_steps", type=int, default=2**20, help="Nominal horizon the cosine LR schedule decays over, independent of max_steps.")
 parser.add_argument("--lr_schedule", type=str, default="fixmatch_cosine", choices=["fixmatch_cosine", "cosine_annealing"], help="LR schedule: rescaled FixMatch cosine (default) or torch's classic CosineAnnealingLR.")
 parser.add_argument("--verbose", type=str2bool, default=False)
+parser.add_argument("--target_acc", type=float, default=None, help="Stop the run early once test_acc reaches this value.")
 parser.add_argument("--use_ema", type=str2bool, default=True, help="Evaluate an EMA of the weights instead of the raw training weights.")
 parser.add_argument("--ema_decay", type=float, default=0.999)
 args = parser.parse_args()
@@ -230,14 +231,15 @@ def run_sequencematch():
     )
     scheduler = build_lr_scheduler(optimizer, total_steps, schedule=args.lr_schedule)
 
-    if optimized and torch.cuda.is_available() and "5060" in torch.cuda.get_device_name(0):
+    if optimized and torch.cuda.is_available() and "5060 Ti" in torch.cuda.get_device_name(0):
         try:
-            import triton  # noqa: F401
-
-            model = torch.compile(model, mode="reduce-overhead")
-            logger.info("torch.compile active (mode=reduce-overhead)")
+            import triton
+            triton_available = True
         except ImportError:
-            pass
+            triton_available = False
+        if triton_available:
+            model = torch.compile(model, mode="reduce-overhead")
+            logger.info("torch.compile activé (mode=reduce-overhead)")
 
     tau = args.tau
     T = args.T
@@ -276,6 +278,7 @@ def run_sequencematch():
 
     test_period = args.test_period
     verbose = args.verbose
+    target_acc = args.target_acc
 
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     results_dir = os.path.join(repo_root, "results", name_of_experiment)
@@ -449,6 +452,10 @@ def run_sequencematch():
                 f"Corrections: {pl_metrics['corrections']}, Bad Corrections: {pl_metrics['bad_corrections']}, New Errors: {pl_metrics['new_errors']}, New Correct: {pl_metrics['new_correct']}, Loss: {metrics['train_loss'][-1]:.4f}, "
                 f"Time: {metrics['time_elapsed'][-1]:.2f}s"
             )
+
+            if target_acc is not None and acc >= target_acc:
+                logger.info(f"Reached target_acc={target_acc:.4f} at step {step + 1} (acc={acc:.4f}) — stopping early.")
+                break
         elif verbose:
             print(
                 f"Step {step + 1}/{max_steps}, Loss: {loss_total.item():.4f}, "
