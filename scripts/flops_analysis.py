@@ -17,6 +17,7 @@ Usage :
 import argparse
 import json
 import platform
+from functools import partial
 from pathlib import Path
 
 import torch
@@ -38,8 +39,13 @@ MU = {
     "efficientmatch": 3,
     "efficientmatch_2": 3,
     "efficientmatch_3": 3,
+    "efficientmatch_3_mu1": 1,
+    "efficientmatch_3_mu5": 5,
+    "efficientmatch_3_mu7": 7,
+    "efficientmatch_flex_mu2": 2,
     "sequencematch": 7,
     "regmixmatch": 7,
+    "regmixmatch_mu3": 3,
 }
 
 
@@ -127,10 +133,10 @@ def mixmatch_iter_flops(model, device):
     return fc.get_total_flops()
 
 
-def efficientmatch_iter_flops(model, device):
+def efficientmatch_iter_flops(model, device, mu=None):
     """1 forward no_grad (pseudo-labels, mu*B) + 2 forward+backward fusionnés dans le même
     graphe (B + mu*B chacun) : un forward FixMatch-like et un forward sur le mélange mixup."""
-    B, muB = BATCH_SIZE_L, MU["efficientmatch"] * BATCH_SIZE_L
+    B, muB = BATCH_SIZE_L, (mu if mu is not None else MU["efficientmatch"]) * BATCH_SIZE_L
     x_l, y_l = _dummy_images(B, device), _dummy_labels(B, device)
     x_u_w, x_u_s = _dummy_images(muB, device), _dummy_images(muB, device)
     beta_dist = torch.distributions.Beta(0.75, 0.75)
@@ -172,29 +178,29 @@ def efficientmatch_iter_flops(model, device):
     return fc.get_total_flops()
 
 
-def efficientmatch_2_iter_flops(model, device):
+def efficientmatch_2_iter_flops(model, device, mu=None):
     """Same forward-call sequence as efficientmatch: efficientmatch_2 only changes the mixup
     loss formula (a plain scalar-index cross_entropy vs. the two-term split above), which is an
     elementwise/reduction op that FlopCounterMode doesn't attribute matmul/conv FLOPs to -- the
     model() calls and their shapes are identical, so the FLOPs/iter are the same."""
-    return efficientmatch_iter_flops(model, device)
+    return efficientmatch_iter_flops(model, device, mu)
 
 
-def efficientmatch_3_iter_flops(model, device):
+def efficientmatch_3_iter_flops(model, device, mu=None):
     """Same forward-call sequence as efficientmatch/efficientmatch_2: efficientmatch_3 only
     removes the .argmax(dim=1) from the mixup cross_entropy target (soft vs. hard labels), which
     doesn't change any model() call or tensor shape, so the FLOPs/iter are the same."""
-    return efficientmatch_iter_flops(model, device)
+    return efficientmatch_iter_flops(model, device, mu)
 
 
-def regmixmatch_iter_flops(model, device):
+def regmixmatch_iter_flops(model, device, mu=None):
     """As actually run in this repo (--static_shapes True, --disab_cam True, the defaults used
     for every regmixmatch experiment): 2 forward+backward calls, no separate no_grad pseudo-label
     pass -- the first forward already yields the pseudo-labels as a slice of its own output.
     1) model(cat(x_l, x_u_w, x_u_s)): B + 2*mu*B.
     2) model(mixed_x) where mixed_x = resizemix(cat(x_l, x_u_s)): B + mu*B (static_shapes mixes
     over the full labeled+unlabeled population every step, not a confidence-filtered subset)."""
-    B, muB = BATCH_SIZE_L, MU["regmixmatch"] * BATCH_SIZE_L
+    B, muB = BATCH_SIZE_L, (mu if mu is not None else MU["regmixmatch"]) * BATCH_SIZE_L
     x_l, y_l = _dummy_images(B, device), _dummy_labels(B, device)
     x_u_w, x_u_s = _dummy_images(muB, device), _dummy_images(muB, device)
 
@@ -260,8 +266,13 @@ METHODS = {
     "efficientmatch": efficientmatch_iter_flops,
     "efficientmatch_2": efficientmatch_2_iter_flops,
     "efficientmatch_3": efficientmatch_3_iter_flops,
+    "efficientmatch_3_mu1": partial(efficientmatch_3_iter_flops, mu=MU["efficientmatch_3_mu1"]),
+    "efficientmatch_3_mu5": partial(efficientmatch_3_iter_flops, mu=MU["efficientmatch_3_mu5"]),
+    "efficientmatch_3_mu7": partial(efficientmatch_3_iter_flops, mu=MU["efficientmatch_3_mu7"]),
+    "efficientmatch_flex_mu2": partial(efficientmatch_iter_flops, mu=MU["efficientmatch_flex_mu2"]),
     "sequencematch": sequencematch_iter_flops,
     "regmixmatch": regmixmatch_iter_flops,
+    "regmixmatch_mu3": partial(regmixmatch_iter_flops, mu=MU["regmixmatch_mu3"]),
 }
 
 

@@ -26,6 +26,7 @@ sys.path.append("..")
 from datasets_utils import TransformedDataset
 from models import build_model
 from utils import evaluate_f1_and_accuracy
+from ema import EMA
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -56,19 +57,27 @@ def measure(dataset, model_name, widen_factor, depth, topk, num_repeats, optimiz
     cfg = DATASET_CONFIG[dataset]
     test_loader, n_test = build_test_loader(dataset, cfg["mean"], cfg["std"], optimized)
 
+    train_model = build_model(model_name, cfg["num_classes"], widen_factor, depth).to(device)
     eval_model = build_model(model_name, cfg["num_classes"], widen_factor, depth).to(device)
     if optimized:
+        train_model = train_model.to(memory_format=torch.channels_last)
         eval_model = eval_model.to(memory_format=torch.channels_last)
     eval_model.eval()
+    # Every real training script calls ema.copy_to(eval_model) immediately before each
+    # evaluation -- verified in situ (scripts/ghost_method.py) to add a measurable ~5% on top
+    # of the bare evaluate_f1_and_accuracy() call, so it must be included here too.
+    ema = EMA(train_model, 0.999)
 
     # Warmup: first call pays for cuDNN autotuning / lazy CUDA init, not representative.
     for _ in range(2):
+        ema.copy_to(eval_model)
         evaluate_f1_and_accuracy(eval_model, test_loader, device, topk)
 
     times = []
     for _ in range(num_repeats):
         torch.cuda.synchronize() if device.type == "cuda" else None
         t0 = time.perf_counter()
+        ema.copy_to(eval_model)
         evaluate_f1_and_accuracy(eval_model, test_loader, device, topk)
         torch.cuda.synchronize() if device.type == "cuda" else None
         times.append(time.perf_counter() - t0)
@@ -98,6 +107,9 @@ def main():
     parser.add_argument("--num_repeats", type=int, default=15, help="Number of timed evaluation passes to average over.")
     parser.add_argument("--optimized", type=lambda s: s.lower() != "false", default=True, help="Match --optimized as used by the training scripts (channels_last + persistent dataloader workers).")
     args = parser.parse_args()
+
+    torch.backends.cudnn.benchmark = True
+    torch.set_float32_matmul_precision("high")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Device: {device}")

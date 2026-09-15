@@ -2,14 +2,69 @@
 
 Mesures réalisées via `scripts/flops_analysis.py` sur cuda (`torch==2.12.1+cu130`, Python 3.11.15), avec `torch.utils.flop_counter.FlopCounterMode` sur des tenseurs factices (dummy tensors) -- indépendant des données, de `--optimized`/`--amp`/`torch.compile`.
 
-Modèle : WideResNet-28-2 ; batch labellisé = 64.
+Batch labellisé = 64 (toutes architectures). CIFAR-10 et SVHN utilisent WideResNet-28-2 dans tous
+les scripts de ce dépôt ; CIFAR-100 utilise WideResNet-28-8 (`--widen_factor 8`). Les FLOPs/itération
+sont spécifiques à l'architecture -- ne jamais réutiliser une valeur WRN-28-2 pour un run CIFAR-100.
 
-## Résultats
+## Résultats — WideResNet-28-2 (CIFAR-10, SVHN)
 
 | Méthode | mu | Batch non labellisé | FLOPs / itération | GFLOPs / itération |
 |---|---:|---:|---:|---:|
 | efficientmatch | 3 | 192 | 7.404e+11 | 740.35 |
+| efficientmatch_2 | 3 | 192 | 7.404e+11 | 740.35 |
+| efficientmatch_3 | 3 | 192 | 7.404e+11 | 740.35 |
+| efficientmatch_3_mu1 | 1 | 64 | 3.565e+11 | 356.46 |
+| efficientmatch_3_mu5 | 5 | 320 | 1.124e+12 | 1124.25 |
+| efficientmatch_3_mu7 | 7 | 448 | 1.508e+12 | 1508.14 |
+| efficientmatch_flex_mu2 | 2 | 128 | 5.484e+11 | 548.40 |
 | fixmatch | 7 | 448 | 8.501e+11 | 850.10 |
 | flexmatch | 7 | 448 | 8.501e+11 | 850.10 |
 | mixmatch | 1 | 64 | 3.016e+11 | 301.64 |
+| regmixmatch | 7 | 448 | 1.892e+12 | 1891.86 |
+| regmixmatch_mu3 | 3 | 192 | 9.048e+11 | 904.80 |
 | sequencematch | 7 | 448 | 1.810e+12 | 1809.61 |
+
+## Résultats — WideResNet-28-8 (CIFAR-100)
+
+Mesuré via `python flops_analysis.py --methods fixmatch flexmatch mixmatch --widen-factor 8`
+(seules méthodes testées sur CIFAR-100 à ce jour, cf. `SEEDS_2312_308_2701_INVENTORY.md`).
+
+| Méthode | mu | Batch non labellisé | FLOPs / itération | GFLOPs / itération |
+|---|---:|---:|---:|---:|
+| fixmatch | 7 | 448 | 1.333e+13 | 13332.36 |
+| flexmatch | 7 | 448 | 1.333e+13 | 13332.36 |
+| mixmatch | 1 | 64 | 4.731e+12 | 4730.83 |
+
+## Coût d'une évaluation (indépendant de la méthode SSL)
+
+Toutes les méthodes appellent la même fonction `evaluate_f1_and_accuracy()` (`scripts/utils.py`)
+sur le même type de modèle/test_loader à chaque `test_period` steps -- le coût d'une évaluation ne
+dépend donc que de (dataset, architecture), pas de la méthode SSL. Mesuré via
+`scripts/measure_eval_time.py` (isolé, EMA-copy inclus) et vérifié en conditions réelles via
+`scripts/ghost_method.py` (mêmes dataloaders/augmentations/EMA/torch.compile qu'un vrai run, mais
+la boucle d'entraînement ne fait rien -- seule l'évaluation consomme du GPU) :
+
+| Architecture | Dataset test | Mesure isolée | Mesure in situ | Écart |
+|---|---|---:|---:|---:|
+| WRN-28-2 | CIFAR-10 (10 000 images) | 544.7 ms | 553.7 ms | +1.6% |
+| WRN-28-8 | CIFAR-100 (10 000 images) | 4 434.8 ms | 4 476.3 ms | +0.9% |
+
+L'accord à moins de 2% entre les deux méthodes de mesure confirme que la valeur isolée est fiable
+pour estimer le coût réel pendant un run d'entraînement.
+
+**Impact sur le temps de run mesuré**, pour le run ayant le plus grand nombre d'évaluations
+(donc le cas le plus défavorable) sur chaque dataset :
+
+| Dataset | Run (le plus d'évaluations) | n_evals | Temps total | Overhead éval | % du temps total |
+|---|---|---:|---:|---:|---:|
+| CIFAR-10 (WRN-28-2) | mixmatch, 250 labels, seed 308 | 1 767 | 276.6 min | 16.31 min | **5.89%** |
+| CIFAR-100 (WRN-28-8) | fixmatch, 250 labels, seed 2312 | 90 | 459.3 min | 6.71 min | **1.46%** |
+
+Même dans le pire cas (méthode la plus lente à converger, donc avec le plus d'évaluations),
+l'overhead d'évaluation reste modéré : sous 6% sur CIFAR-10, sous 1.5% sur CIFAR-100 malgré un coût
+par évaluation ~8x plus élevé (le run cifar100 étant beaucoup plus long en absolu, l'overhead pèse
+proportionnellement moins). Pour les comparaisons de vitesse entre méthodes sur une même config,
+cet overhead n'est donc généralement pas un facteur de confusion significatif -- sauf pour des runs
+très courts avec beaucoup d'évaluations rapprochées (`test_period` faible), où il peut représenter
+jusqu'à ~10% du temps mesuré (cf. cas cifar100-10000/mixmatch, 11.26% observé pour un run de 28 min
+avec 43 évaluations).
