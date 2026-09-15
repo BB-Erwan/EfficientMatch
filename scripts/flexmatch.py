@@ -326,7 +326,11 @@ def run_flexmatch():
             if select.any():
                 selected_label[idx[select]] = pseudo[select]
 
-            counts = torch.bincount(selected_label[selected_label != -1] + 1, minlength=num_classes + 1)
+            # bin 0 = count of still-unselected (-1) samples, bins 1..num_classes = per-class counts.
+            # thresh_warmup relies on bin 0 dominating early training (huge relative to any real
+            # class) to keep classwise_acc near 0 -- and thus the mask permissive -- until enough
+            # samples have been confidently pseudo-labeled; it must NOT be filtered out beforehand.
+            counts = torch.bincount(selected_label + 1, minlength=num_classes + 1)
             if counts.max().item() < selected_label.shape[0]:
                 counts_per_class = counts[1:].float()
                 if thresh_warmup:

@@ -36,7 +36,10 @@ MU = {
     "flexmatch": 7,
     "mixmatch": 1,
     "efficientmatch": 3,
+    "efficientmatch_2": 3,
+    "efficientmatch_3": 3,
     "sequencematch": 7,
+    "regmixmatch": 7,
 }
 
 
@@ -169,6 +172,55 @@ def efficientmatch_iter_flops(model, device):
     return fc.get_total_flops()
 
 
+def efficientmatch_2_iter_flops(model, device):
+    """Same forward-call sequence as efficientmatch: efficientmatch_2 only changes the mixup
+    loss formula (a plain scalar-index cross_entropy vs. the two-term split above), which is an
+    elementwise/reduction op that FlopCounterMode doesn't attribute matmul/conv FLOPs to -- the
+    model() calls and their shapes are identical, so the FLOPs/iter are the same."""
+    return efficientmatch_iter_flops(model, device)
+
+
+def efficientmatch_3_iter_flops(model, device):
+    """Same forward-call sequence as efficientmatch/efficientmatch_2: efficientmatch_3 only
+    removes the .argmax(dim=1) from the mixup cross_entropy target (soft vs. hard labels), which
+    doesn't change any model() call or tensor shape, so the FLOPs/iter are the same."""
+    return efficientmatch_iter_flops(model, device)
+
+
+def regmixmatch_iter_flops(model, device):
+    """As actually run in this repo (--static_shapes True, --disab_cam True, the defaults used
+    for every regmixmatch experiment): 2 forward+backward calls, no separate no_grad pseudo-label
+    pass -- the first forward already yields the pseudo-labels as a slice of its own output.
+    1) model(cat(x_l, x_u_w, x_u_s)): B + 2*mu*B.
+    2) model(mixed_x) where mixed_x = resizemix(cat(x_l, x_u_s)): B + mu*B (static_shapes mixes
+    over the full labeled+unlabeled population every step, not a confidence-filtered subset)."""
+    B, muB = BATCH_SIZE_L, MU["regmixmatch"] * BATCH_SIZE_L
+    x_l, y_l = _dummy_images(B, device), _dummy_labels(B, device)
+    x_u_w, x_u_s = _dummy_images(muB, device), _dummy_images(muB, device)
+
+    model.zero_grad(set_to_none=True)
+    with FlopCounterMode(display=False) as fc:
+        all_logits = model(torch.cat([x_l, x_u_w, x_u_s], dim=0))
+        logits_l, logits_w, logits_s = all_logits[:B], all_logits[B:B + muB], all_logits[B + muB:]
+
+        sup_loss = F.cross_entropy(logits_l, y_l)
+        with torch.no_grad():
+            prob_w = F.softmax(logits_w.float(), dim=-1)
+            max_probs, pseudo = torch.max(prob_w, dim=-1)
+        ce_per_sample = F.cross_entropy(logits_s, pseudo, reduction="none")
+        unsup_loss = ce_per_sample.mean()
+
+        mixed_x = _dummy_images(B + muB, device)  # resizemix output: same shape as its conf_data_full input
+        logits_mix = model(mixed_x)
+        mixed_y = F.one_hot(_dummy_labels(B + muB, device), NUM_CLASSES).float()
+        mix_loss = (F.log_softmax(logits_mix, dim=-1) * -mixed_y).sum(dim=-1).mean()
+
+        loss = sup_loss + unsup_loss + mix_loss
+        loss.backward()
+    model.zero_grad(set_to_none=True)
+    return fc.get_total_flops()
+
+
 def sequencematch_iter_flops(model, device):
     """1 seul forward+backward sur la concaténation labeled + 3 vues non labellisées
     (faible/médium/forte) : B + 3*mu*B."""
@@ -206,7 +258,10 @@ METHODS = {
     "flexmatch": flexmatch_iter_flops,
     "mixmatch": mixmatch_iter_flops,
     "efficientmatch": efficientmatch_iter_flops,
+    "efficientmatch_2": efficientmatch_2_iter_flops,
+    "efficientmatch_3": efficientmatch_3_iter_flops,
     "sequencematch": sequencematch_iter_flops,
+    "regmixmatch": regmixmatch_iter_flops,
 }
 
 
