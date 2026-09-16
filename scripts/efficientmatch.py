@@ -229,7 +229,7 @@ def run_efficientmatch():
 
     adaptive_threshold = args.adaptive_threshold
     thresh_warmup = args.thresh_warmup
-    method_name = "efficientmatch" + ("_flex" if adaptive_threshold else "") + ("_ema" if args.use_ema else "") + (f"_mu{mu}" if mu != 3 else "")
+    method_name = "efficientmatch" + ("_flex" if adaptive_threshold else "") + ("_ema" if args.use_ema else "") + (f"_mu{mu}" if mu != 3 else "") + (f"_wf{args.widen_factor}" if args.widen_factor != 2 else "")
     dataset_prefix = f"{args.dataset}-"
     name_of_experiment = f"{dataset_prefix}labeled-{num_labeled}-seed-{args.seed}"
 

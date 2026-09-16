@@ -2,6 +2,16 @@
 
 Suivi des runs arrêtés manuellement parce qu'ils divergent, stagnent ou sont anormalement lents. Chaque entrée note l'état au moment de l'arrêt pour pouvoir reprendre l'analyse plus tard.
 
+## regmixmatch — CIFAR-100, 10000 labels, seed 2312, target_acc 0.60, test_period 256, --static_shapes True
+
+- **Commande** : `python regmixmatch.py --dataset cifar100 --num_labeled 10000 --seed 2312 --widen_factor 8 --target_acc 0.60 --test_period 256 --static_shapes True`
+- **Arrêté le** : 2026-09-16 (décision manuelle après diagnostic)
+- **État à l'arrêt** : 6 évaluations, step 1280, **440.0 minutes (7h20)** écoulées
+- **Accuracy** : dernière valeur 9.26%, très loin de l'objectif de 60%
+- **Diagnostic** : ralentissement extrême et parfaitement régulier — ~87 minutes par intervalle de 256 steps sur 4 intervalles consécutifs quasi identiques (86.4, 87.2, 87.0, 87.0 min), soit ~20s/step contre ~0.6s/step pour fixmatch/mixmatch sur la même architecture (WRN-28-8) — un facteur ~32x, largement au-delà de ce que justifierait le surcoût de calcul de regmixmatch (mu=7, 2 forwards/step). Root cause identifiée via `nvidia-smi` : **VRAM quasi saturée** (7838/8151 MiB, 96%) avec le GPU affichant 100% d'utilisation pour seulement 37W de consommation (au lieu de ~150-180W en charge normale) — signature typique d'un GPU qui passe son temps à gérer la mémoire (thrashing/allocation) plutôt qu'à calculer réellement. Cette carte n'a que 8GB de VRAM ; WRN-28-8 (23M paramètres) combiné aux gros batches de regmixmatch et aux pools mémoire de `torch.compile(mode="reduce-overhead")` (CUDA graphs) semble dépasser la capacité disponible
+- **Incident technique associé** : aucun rapport avec le bug thresh_warmup ou les problèmes GPU-mismatch documentés ailleurs dans ce fichier — cause distincte (saturation VRAM spécifique à cette combinaison modèle/méthode/GPU)
+- **À refaire** : oui, en désactivant `torch.compile` (`--optimized False`) pour réduire l'empreinte VRAM, ou en réduisant `--mu` pour regmixmatch sur cette config précise. Si le problème persiste sans compile, envisager de renoncer à regmixmatch sur CIFAR-100 avec cette architecture/carte
+
 ## flexmatch — CIFAR-100, 10000 labels, seed 2312, target_acc 0.60, test_period 256
 
 - **Commande** : `python flexmatch.py --dataset cifar100 --widen_factor 8 --num_labeled 10000 --seed 2312 --target_acc 0.60 --test_period 256`

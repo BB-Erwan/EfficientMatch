@@ -374,7 +374,7 @@ def run_regmixmatch():
     alpha_l = args.alpha_l
     confident_pool_full = (num_labeled / num_classes) >= 100  # rich-label regime: mix confident pool + labeled data
 
-    method_name = "regmixmatch" + (f"_mu{args.mu}" if args.mu != 7 else "") + ("_ema" if args.use_ema else "")
+    method_name = "regmixmatch" + (f"_mu{args.mu}" if args.mu != 7 else "") + ("_ema" if args.use_ema else "") + (f"_wf{args.widen_factor}" if args.widen_factor != 2 else "")
     dataset_prefix = f"{args.dataset}-"
     name_of_experiment = f"{dataset_prefix}labeled-{num_labeled}-seed-{args.seed}"
 

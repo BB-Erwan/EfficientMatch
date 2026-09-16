@@ -232,7 +232,7 @@ def run_flexmatch():
 
     # -- Hyper-parameters FlexMatch ---------------------------------------------
     # tau=0.95 (confidence), mu=7 (unlabeled:labeled ratio), loss=Ls+Lu
-    method_name = "flexmatch" + ("_ema" if args.use_ema else "")
+    method_name = "flexmatch" + ("_ema" if args.use_ema else "") + (f"_wf{args.widen_factor}" if args.widen_factor != 2 else "")
     dataset_prefix = f"{args.dataset}-"
     name_of_experiment = f"{dataset_prefix}labeled-{num_labeled}-seed-{args.seed}"
 

@@ -3,8 +3,15 @@
 Mesures réalisées via `scripts/flops_analysis.py` sur cuda (`torch==2.12.1+cu130`, Python 3.11.15), avec `torch.utils.flop_counter.FlopCounterMode` sur des tenseurs factices (dummy tensors) -- indépendant des données, de `--optimized`/`--amp`/`torch.compile`.
 
 Batch labellisé = 64 (toutes architectures). CIFAR-10 et SVHN utilisent WideResNet-28-2 dans tous
-les scripts de ce dépôt ; CIFAR-100 utilise WideResNet-28-8 (`--widen_factor 8`). Les FLOPs/itération
-sont spécifiques à l'architecture -- ne jamais réutiliser une valeur WRN-28-2 pour un run CIFAR-100.
+les scripts de ce dépôt ; CIFAR-100 utilisait WideResNet-28-8 (`--widen_factor 8`) à l'origine, mais
+**WRN-28-8 sature la VRAM de ce GPU (8GB) avec certaines méthodes** (voir `RUNS_TO_REVISIT.md`,
+incident regmixmatch/CIFAR-100) -- WideResNet-28-4 (`--widen_factor 4`) est donc devenu l'architecture
+de facto pour la plupart des runs CIFAR-100 de cette session (fixmatch, flexmatch, mixmatch,
+regmixmatch, efficientmatch_3 ont tous été retestés en WF4). Les FLOPs/itération sont spécifiques à
+l'architecture -- ne jamais réutiliser une valeur d'une architecture pour une autre. Les fichiers de
+résultats distinguent l'architecture par un suffixe `_wf{N}` dans leur nom (ex.
+`fixmatch_ema_wf4_metrics.json`) ; un fichier sans suffixe sur CIFAR-100 est un run historique en
+WRN-28-8 (avant l'ajout de cette convention de nommage).
 
 ## Résultats — WideResNet-28-2 (CIFAR-10, SVHN)
 
@@ -24,7 +31,19 @@ sont spécifiques à l'architecture -- ne jamais réutiliser une valeur WRN-28-2
 | regmixmatch_mu3 | 3 | 192 | 9.048e+11 | 904.80 |
 | sequencematch | 7 | 448 | 1.810e+12 | 1809.61 |
 
-## Résultats — WideResNet-28-8 (CIFAR-100)
+## Résultats — WideResNet-28-4 (CIFAR-100, architecture de facto sur ce GPU)
+
+Mesuré via `python flops_analysis.py --methods fixmatch flexmatch mixmatch regmixmatch efficientmatch_3 --widen-factor 4`.
+
+| Méthode | mu | Batch non labellisé | FLOPs / itération | GFLOPs / itération |
+|---|---:|---:|---:|---:|
+| fixmatch | 7 | 448 | 3.355e+12 | 3354.88 |
+| flexmatch | 7 | 448 | 3.355e+12 | 3354.88 |
+| mixmatch | 1 | 64 | 1.190e+12 | 1190.43 |
+| regmixmatch | 7 | 448 | 7.467e+12 | 7467.01 |
+| efficientmatch_3 | 3 | 192 | 2.922e+12 | 2921.93 |
+
+## Résultats — WideResNet-28-8 (CIFAR-100, runs historiques uniquement -- voir avertissement VRAM ci-dessus)
 
 Mesuré via `python flops_analysis.py --methods fixmatch flexmatch mixmatch --widen-factor 8`
 (seules méthodes testées sur CIFAR-100 à ce jour, cf. `SEEDS_2312_308_2701_INVENTORY.md`).
@@ -47,6 +66,7 @@ la boucle d'entraînement ne fait rien -- seule l'évaluation consomme du GPU) :
 | Architecture | Dataset test | Mesure isolée | Mesure in situ | Écart |
 |---|---|---:|---:|---:|
 | WRN-28-2 | CIFAR-10 (10 000 images) | 544.7 ms | 553.7 ms | +1.6% |
+| WRN-28-4 | CIFAR-100 (10 000 images) | 1 492.8 ms | 1 499.1 ms | +0.4% |
 | WRN-28-8 | CIFAR-100 (10 000 images) | 4 434.8 ms | 4 476.3 ms | +0.9% |
 
 L'accord à moins de 2% entre les deux méthodes de mesure confirme que la valeur isolée est fiable

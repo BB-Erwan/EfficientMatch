@@ -247,7 +247,7 @@ def run_sequencematch():
     thresh_warmup = args.thresh_warmup
     use_flex = args.use_flex
 
-    method_name = "sequencematch" + ("_ema" if args.use_ema else "")
+    method_name = "sequencematch" + ("_ema" if args.use_ema else "") + (f"_wf{args.widen_factor}" if args.widen_factor != 2 else "")
     dataset_prefix = f"{args.dataset}-"
     name_of_experiment = f"{dataset_prefix}labeled-{num_labeled}-seed-{args.seed}"
 
