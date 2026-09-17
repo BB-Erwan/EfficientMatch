@@ -76,6 +76,7 @@ dans une fourchette étroite (5.2-18.4 min).
 |---|---:|---:|---:|---:|---:|
 | efficientmatch_3 | 42 000 | 30.4 min | 29.6 min | 80.11% | 31 095 TFLOPs |
 | fixmatch | 170 500 | 272.5 min | 269.3 min | 80.06% | 144 942 TFLOPs |
+| fixmatch (bis, même config) | 127 000 | 116.0 min | 113.7 min | 80.05% | 107 963 TFLOPs |
 | regmixmatch | 35 000 | 61.2 min | 60.6 min | 80.04% | 66 215 TFLOPs |
 | flexmatch | 65 500 | 64.6 min | 63.3 min | 80.03% | 55 682 TFLOPs |
 | mixmatch | 827 500 | 778.7 min (13h) | 763.4 min | 78.42% (max) | 249 607 TFLOPs — ❌ jamais atteint 80% |
@@ -104,7 +105,10 @@ dans une fourchette étroite (5.2-18.4 min).
 flexmatch et regmixmatch (classement variable selon la seed). **mixmatch est nettement le point
 faible de cette config** : catastrophique sur seed 2312 (n'atteint jamais 80% en 13h), et très lent
 même quand il converge sur les 2 autres seeds (137-260 min). fixmatch reste globalement lent
-(57-272 min), avec un cas extrême sur seed 2312 (272.5 min).
+(57-272 min), avec un cas extrême sur seed 2312 (272.5 min) — **un second run (bis) sur cette même
+config a mis 116.0 min, soit plus de 2x plus rapide avec un code strictement identique**, signe
+d'une forte variance run-à-run pour fixmatch sur cette config plutôt que d'un problème
+méthodologique systématique.
 
 ---
 
@@ -162,27 +166,27 @@ flexmatch et fixmatch restent les plus lents, sans ordre stable entre eux selon 
 
 | Méthode | Steps | Temps | Temps corrigé | Acc | FLOPs |
 |---|---:|---:|---:|---:|---:|
+| mixmatch | 12 800 | 11.3 min | 10.0 min | 60.08% | 15 238 TFLOPs |
 | efficientmatch_3 | 10 240 | 21.4 min | 20.4 min | 60.29% | 29 921 TFLOPs |
 | regmixmatch | 5 888 | 28.0 min | 27.4 min | 60.31% | 43 966 TFLOPs |
 | fixmatch | 12 800 | 29.2 min | 28.0 min | 60.01% | 42 942 TFLOPs |
 | flexmatch | 12 288 | 30.5 min | 29.2 min | 60.51% | 41 225 TFLOPs |
-| mixmatch | — | — | — | — | ❌ **manquant en WF4** (seule une mesure WRN-28-8 existe) |
 
 ### Seed 2701
 
 | Méthode | Steps | Temps | Temps corrigé | Acc | FLOPs |
 |---|---:|---:|---:|---:|---:|
-| efficientmatch_3 | 9 728 | 25.3 min | 24.3 min | 60.05% | 28 425 TFLOPs |
+| mixmatch | 13 568 | 11.9 min | 10.6 min | 60.11% | 16 152 TFLOPs |
 | regmixmatch | 6 144 | 25.2 min | 24.6 min | 60.14% | 45 877 TFLOPs |
-| fixmatch | — | — | — | — | ❌ **jamais lancé en WF4** |
-| flexmatch | — | — | — | — | ❌ **tentative avortée** (arrêtée quasi immédiatement, aucun résultat exploitable) |
-| mixmatch | — | — | — | — | ❌ **manquant en WF4** (seule une mesure WRN-28-8 existe) |
+| efficientmatch_3 | 9 728 | 25.3 min | 24.3 min | 60.05% | 28 425 TFLOPs |
+| flexmatch | 11 264 | 26.0 min | 24.9 min | 60.20% | 37 789 TFLOPs |
+| fixmatch | 13 568 | 31.1 min | 29.7 min | 60.00% | 45 519 TFLOPs |
 
-**Synthèse** : sur les deux seeds où la comparaison est complète (2312, 0308), **efficientmatch_3 et
-mixmatch dominent** en temps (10.0-20.4 min corrigé), regmixmatch et fixmatch se tiennent en milieu
-de classement (~24-28 min), flexmatch est le plus lent des méthodes qui convergent (29-33 min).
-**Trous restants avant publication** : fixmatch et flexmatch sur seed 2701 (WF4), mixmatch en WF4
-sur seeds 308 et 2701.
+**Synthèse** : **mixmatch est systématiquement le plus rapide et le plus économe en FLOPs** sur
+cette config (10.0-20.4 min corrigé selon la seed, 15.2-16.2k TFLOPs quand il domine), suivi
+d'efficientmatch_3 (18.8-24.3 min). regmixmatch et fixmatch se tiennent en milieu de classement
+(~24-28 min), flexmatch est le plus lent des méthodes qui convergent (25-33 min). **Couverture
+désormais complète sur les 3 seeds pour les 5 méthodes.**
 
 ---
 
@@ -193,9 +197,9 @@ sur seeds 308 et 2701.
 | SVHN, 250 labels | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 (**0/3 atteint 90%**) | ✅ 3/3 | ✅ 3/3 |
 | CIFAR-10, 250 labels | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 (1 jamais convergé) | ✅ 3/3 |
 | CIFAR-10, 4000 labels | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 |
-| CIFAR-100, 10000 labels (WF4) | ✅ 3/3 | 2/3 (seed 2701 manquante) | 2/3 (seed 2701 avortée) | 1/3 (seed 2312 seulement) | ✅ 3/3 |
+| CIFAR-100, 10000 labels (WF4) | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 |
 
-**Couverture complète sur les 3 seeds** : SVHN 250, CIFAR-10 250, CIFAR-10 4000 — les 5 méthodes.
-Sur CIFAR-100 10000 (WF4), efficientmatch_3 et regmixmatch sont complets ; il manque fixmatch et
+**Couverture complète sur les 3 seeds pour les 4 configs et les 5 méthodes.** Aucun trou restant
+dans le périmètre retenu pour l'article.
 flexmatch sur seed 2701, et mixmatch sur seeds 308 et 2701. **Reste à faire avant publication** :
 ces 4 runs manquants sur CIFAR-100 10000 labels/WF4.
