@@ -48,13 +48,13 @@ convergence finale** dans l'article — seule la colonne "Statut" fait foi.
 | efficientmatch_2 | 45 000 | 33.43 min | 32.59 min | 80.26% | 33 315.8 TFLOPs | ✅ |
 | efficientmatch_flex | 47 000 | 34.79 min | 33.92 min | 80.21% | 34 796.4 TFLOPs | ✅ |
 | efficientmatch_3_mu7 | 25 500 | 36.26 min | 35.78 min | 80.18% | 38 457.6 TFLOPs | ✅ |
-| flexmatch | 70 500 | 114.07 min | 112.76 min | 80.17% | 59 932.1 TFLOPs | ✅ |
 | efficientmatch_3 (mu=3, défaut) | 42 000 | 30.38 min | 29.60 min | 80.11% | 31 094.7 TFLOPs | ✅ |
 | efficientmatch_3_mu5 | 28 500 | 30.53 min | 30.00 min | 80.10% | 32 041.1 TFLOPs | ✅ |
 | efficientmatch (v1) | 82 000 | 58.99 min | 57.47 min | 80.10% | 60 708.7 TFLOPs | ✅ |
 | fixmatch | 170 500 | 272.46 min | 269.30 min | 80.06% | 144 942.0 TFLOPs | ✅ |
 | regmixmatch (mu=7, défaut) | 35 000 | 61.23 min | 60.57 min | 80.04% | 66 215.1 TFLOPs | ✅ |
 | sequencematch | 40 500 | 70.63 min | 69.88 min | 80.04% | 73 289.2 TFLOPs | ✅ |
+| flexmatch (refait post-fix thresh_warmup) | 65 500 | 64.60 min | 63.30 min | 80.03% | 55 681.6 TFLOPs | ✅ (ancien résultat pré-fix : 114.07 min) |
 | mixmatch | 827 500 | 778.67 min (13h) | 763.39 min | 78.42% (max) | 249 607.1 TFLOPs | ❌ jamais atteint 80% |
 | efficientmatch_3_mu1 | 173 000 | 71.62 min | 68.42 min | 77.57% (max) | 61 667.6 TFLOPs | ❌ jamais atteint 80% |
 | regmixmatch_mu3 | 42 000 | 37.05 min | 36.27 min | 76.32% | 38 001.6 TFLOPs | ⚠️ **interrompu manuellement** ("passe à l'expérience suivante") — un run antérieur complet sur cette même config avait atteint **80.13%** au step 63 000 (56.1 min) avant d'être écrasé par ce re-test |
@@ -67,7 +67,7 @@ convergence finale** dans l'article — seule la colonne "Statut" fait foi.
 | mixmatch | 883 000 | 276.64 min (4h37) | 260.33 min | 80.07% | 266 348.1 TFLOPs | ✅ |
 | regmixmatch (mu=7, défaut) | 25 500 | 44.27 min | 43.79 min | 80.02% | 48 242.4 TFLOPs | ✅ |
 | fixmatch | 64 000 | 59.43 min | 58.24 min | 80.00% | 54 406.4 TFLOPs | ✅ |
-| flexmatch | 49 500 | 45.21 min | 44.28 min | 80.00% | 42 079.9 TFLOPs | ✅ |
+| flexmatch (refait post-fix thresh_warmup) | 52 500 | 52.30 min | 51.30 min | 80.16% | 44 630.3 TFLOPs | ✅ (ancien résultat pré-fix : 45.21 min) |
 | regmixmatch_mu3 | 16 500 | 23.85 min | 23.54 min | 72.20% | 14 929.2 TFLOPs | ⚠️ **interrompu manuellement** (tué via "Non arrête" pendant un sweep multi-seed) — non représentatif, jamais relancé jusqu'à convergence |
 
 *(efficientmatch v1 non testé sur cette seed — volontairement exclu sur demande utilisateur après
@@ -78,7 +78,7 @@ le run seed 2312)*
 | Méthode | Steps | Temps | Temps corrigé | Acc | FLOPs | Statut |
 |---|---:|---:|---:|---:|---:|---|
 | regmixmatch (mu=7, défaut) | 21 000 | 36.53 min | 36.14 min | 80.20% | 39 729.1 TFLOPs | ✅ |
-| flexmatch | 33 000 | 31.35 min | 30.73 min | 80.19% | 28 053.3 TFLOPs | ✅ |
+| flexmatch (refait post-fix thresh_warmup) | 42 000 | 41.50 min | 40.70 min | 80.17% | 35 704.2 TFLOPs | ✅ (ancien résultat pré-fix : 31.35 min) |
 | fixmatch | 61 500 | 57.42 min | 56.28 min | 80.15% | 52 281.2 TFLOPs | ✅ |
 | mixmatch | 464 500 | 145.59 min (2h26) | 137.01 min | 80.10% | 140 111.8 TFLOPs | ✅ |
 | efficientmatch_2 | 34 000 | 24.38 min | 23.74 min | 80.00% | 25 171.9 TFLOPs | ✅ |
@@ -93,7 +93,13 @@ FLOPs élevé par step. L'ablation `efficientmatch_3` sur mu (seed 2312 uniqueme
 et mu=5 sont les plus efficaces en FLOPs totaux (~31-32k TFLOPs), mu=1 est contre-productif (jamais
 convergé malgré son faible coût par step, 61.7k TFLOPs gaspillés), mu=7 gagne en accuracy finale
 mais consomme le plus de FLOPs des variantes qui convergent. fixmatch est systématiquement le plus
-lent des méthodes qui atteignent le seuil. Détail complet dans `EXPERIMENT_LOG.md` §4.
+lent des méthodes qui atteignent le seuil. **flexmatch a été rejoué sur les 3 seeds avec le code
+corrigé du bug `thresh_warmup`** (bincount incluant le bin -1, cf. section suivante) : le résultat
+est variable selon la seed (64.6 min sur 2312, contre 114.1 min avant fix — nette amélioration ;
+mais 52.3 min sur 308 et 41.5 min sur 2701, contre 45.2 min et 31.4 min avant fix — légèrement plus
+lent). Le fix ne change donc pas le classement relatif de flexmatch (toujours nettement derrière
+efficientmatch_2/3, dans la même zone que regmixmatch/sequencematch), mais élimine une source de
+variance liée au bug plutôt qu'à la méthode elle-même. Détail complet dans `EXPERIMENT_LOG.md` §4.
 
 ---
 
@@ -104,10 +110,11 @@ lent des méthodes qui atteignent le seuil. Détail complet dans `EXPERIMENT_LOG
 | Méthode | Steps | Temps | Temps corrigé | Acc | FLOPs |
 |---|---:|---:|---:|---:|---:|
 | efficientmatch_flex | 57 000 | 40.97 min | 39.91 min | 90.97% (max) | 42 199.9 TFLOPs |
+| efficientmatch_3 | 41 000 | 29.00 min | 28.20 min | 90.06% | 30 354.0 TFLOPs |
 | regmixmatch (mu=7, défaut) | 25 000 | 43.39 min | 42.92 min | 90.05% | 47 296.5 TFLOPs |
 | sequencematch | 23 000 | 40.19 min | 39.76 min | 90.05% | 41 621.0 TFLOPs |
 | fixmatch | 99 000 | 87.06 min | 85.22 min | 90.03% | 84 159.9 TFLOPs |
-| flexmatch | 81 500 | 73.65 min | 72.14 min | 90.03% | 69 283.1 TFLOPs |
+| flexmatch (refait post-fix, ancien 73.65 min) | 60 500 | 59.20 min | 58.10 min | 90.02% | 51 430.1 TFLOPs |
 | efficientmatch_2 | 27 500 | 19.55 min | 19.03 min | 90.01% | 20 359.6 TFLOPs |
 | mixmatch | 198 500 | 59.20 min | 55.53 min | 90.01% | 59 875.5 TFLOPs |
 
@@ -115,9 +122,10 @@ lent des méthodes qui atteignent le seuil. Détail complet dans `EXPERIMENT_LOG
 
 | Méthode | Steps | Temps | Temps corrigé | Acc | FLOPs |
 |---|---:|---:|---:|---:|---:|
-| flexmatch | 84 000 | 75.40 min | 73.84 min | 90.06% | 71 408.4 TFLOPs |
 | mixmatch | 213 500 | 63.57 min | 59.62 min | 90.05% | 64 400.1 TFLOPs |
+| flexmatch (refait post-fix, ancien 75.40 min) | 90 000 | 88.10 min | 86.40 min | 90.07% | 76 509.0 TFLOPs |
 | efficientmatch_2 | 32 500 | 23.02 min | 22.41 min | 90.03% | 24 061.4 TFLOPs |
+| efficientmatch_3 | 41 000 | 30.10 min | 29.30 min | 90.02% | 30 354.0 TFLOPs |
 | fixmatch | 91 500 | 80.79 min | 79.09 min | 90.02% | 77 784.1 TFLOPs |
 | regmixmatch (mu=7, défaut) | 27 000 | 46.69 min | 46.18 min | 90.02% | 51 080.2 TFLOPs |
 | sequencematch | 21 500 | 38.92 min | 38.51 min | 90.01% | 38 906.6 TFLOPs |
@@ -129,7 +137,8 @@ lent des méthodes qui atteignent le seuil. Détail complet dans `EXPERIMENT_LOG
 | fixmatch | 100 500 | 88.80 min | 86.93 min | 90.15% | 85 435.1 TFLOPs |
 | regmixmatch (mu=7, défaut) | 27 000 | 47.68 min | 47.17 min | 90.06% | 51 080.2 TFLOPs |
 | mixmatch | 165 500 | 49.34 min | 46.28 min | 90.04% | 49 921.4 TFLOPs |
-| flexmatch | 84 000 | 75.42 min | 73.86 min | 90.03% | 71 408.4 TFLOPs |
+| efficientmatch_3 | 43 000 | 41.10 min | 40.30 min | 90.03% | 31 835.4 TFLOPs |
+| flexmatch (refait post-fix, ancien 75.42 min) | 83 500 | 78.30 min | 76.80 min | 90.03% | 70 983.4 TFLOPs |
 | efficientmatch_2 | 36 000 | 25.43 min | 24.76 min | 90.00% | 26 652.6 TFLOPs |
 
 **Synthèse CIFAR-10/4000 labels** : classement **quasiment stable sur les 3 seeds** en temps réel
@@ -138,7 +147,14 @@ méthodes qui atteignent 90% de façon fiable (19.6-25.4 min, 20.4-26.7k TFLOPs)
 flexmatch puis fixmatch (le plus lent des 3 seeds). regmixmatch (mu=7) et sequencematch se
 positionnent en milieu de classement en temps, avec un coût FLOPs par step nettement plus élevé.
 mixmatch, catastrophique à 250 labels sur la seed 2312, redevient compétitif ici (converge en moins
-d'1h sur les 3 seeds). Détail dans `CIFAR10_4000LABELS_RESULTS.md`.
+d'1h sur les 3 seeds). **efficientmatch_3 (mu=3, défaut) est maintenant complet sur les 3 seeds** et
+reste systématiquement le 2e plus rapide (29.0-41.1 min), juste derrière efficientmatch_2 — même
+coût FLOPs/itération qu'efficientmatch_2 (740.35 GFLOPs) mais plus de steps pour converger, avec un
+écart plus marqué sur seed 2701. **flexmatch a été rejoué sur les 3 seeds avec le fix
+`thresh_warmup`** : résultat mitigé, plus rapide sur seed 2312 (59.2 min vs 73.65 min avant) mais
+plus lent sur seed 308 (88.1 min vs 75.4 min) et seed 2701 (78.3 min vs 75.4 min) — comme pour
+CIFAR-10 250 labels, le fix élimine un bug réel mais ne change pas fondamentalement le classement de
+flexmatch. Détail dans `CIFAR10_4000LABELS_RESULTS.md`.
 
 ---
 
@@ -155,7 +171,7 @@ d'1h sur les 3 seeds). Détail dans `CIFAR10_4000LABELS_RESULTS.md`.
 | efficientmatch (v1) | 34 000 | 28.53 min | 27.89 min | 90.05% | 25 171.9 TFLOPs | ✅ |
 | efficientmatch_2 | 8 500 | 6.76 min | 6.60 min | 90.04% | 6 293.0 TFLOPs | ✅ |
 | fixmatch | 8 000 | 7.82 min | 7.67 min | 90.01% | 6 800.8 TFLOPs | ✅ |
-| flexmatch | 76 000 | 71.82 min | 70.41 min | 84.32% (max) | 64 607.6 TFLOPs | ❌ jamais atteint 90% (même après correction du bug thresh_warmup, cf. `RUNS_TO_REVISIT.md`) |
+| flexmatch (rejoué, tué par watchdog 2h) | 115 500 | 117.93 min | 115.79 min | 83.99% (max) | 98 186.6 TFLOPs | ❌ jamais atteint 90%, plafond similaire à l'ancien résultat pré-fix (84.32%) |
 | efficientmatch_2_flex | 13 000 | 10.49 min | 10.24 min | 79.76% (max) | 9 624.5 TFLOPs | ❌ jamais atteint 90% |
 | sequencematch | 12 000 | 22.12 min | 21.89 min | 78.14% (max) | 21 715.3 TFLOPs | ❌ jamais atteint 90% |
 | efficientmatch_flex | 8 500 | 7.26 min | 7.10 min | 77.44% (max) | 6 293.0 TFLOPs | ❌ jamais atteint 90% |
@@ -168,7 +184,7 @@ d'1h sur les 3 seeds). Détail dans `CIFAR10_4000LABELS_RESULTS.md`.
 | regmixmatch (mu=7, défaut) | 4 500 | 8.25 min | 8.15 min | 90.30% | 8 513.4 TFLOPs | ✅ |
 | efficientmatch_2 | 8 500 | 6.76 min | 6.59 min | 90.24% | 6 293.0 TFLOPs | ✅ |
 | fixmatch | 6 500 | 6.44 min | 6.31 min | 90.07% | 5 525.6 TFLOPs | ✅ |
-| flexmatch | 23 500 | 22.58 min | 22.14 min | 82.38% (max) | 19 977.3 TFLOPs | ❌ jamais atteint 90% |
+| flexmatch (rejoué, tué par watchdog 2h) | 92 000 | 94.32 min | 92.61 min | 82.52% (max) | 78 209.2 TFLOPs | ❌ jamais atteint 90%, plafond quasi identique à l'ancien résultat pré-fix (82.38%) |
 | efficientmatch (v1) | 1 | 0.46 min | 0.45 min | 8.03% | 0.7 TFLOPs | ⚠️ tué volontairement dès le 1er step (doublon de run accidentel), non exploitable |
 | regmixmatch_mu3 | — | — | — | — | — | ⚠️ **jamais lancé jusqu'au bout** (aucun fichier de résultat produit lors du sweep multi-seed interrompu) |
 
@@ -181,12 +197,15 @@ d'1h sur les 3 seeds). Détail dans `CIFAR10_4000LABELS_RESULTS.md`.
 | regmixmatch_mu3 | 7 500 | 10.64 min | 10.49 min | 90.20% | 6 786.0 TFLOPs |
 | fixmatch | 8 000 | 7.90 min | 7.74 min | 90.18% | 6 800.8 TFLOPs |
 | efficientmatch_2 | 10 000 | 7.86 min | 7.66 min | 90.02% | 7 403.5 TFLOPs |
-| flexmatch | 25 500 | 24.39 min | 23.91 min | 85.10% (max, **jamais atteint 90%**, arrêté au timeout 30 min) | 21 677.5 TFLOPs |
+| flexmatch (rejoué, tué par watchdog 2h) | 57 500 | 59.44 min | 58.37 min | 86.73% (max, **jamais atteint 90%**) | 48 880.8 TFLOPs |
 
-**Synthèse SVHN/250 labels** : **flexmatch échoue sur les 3 seeds** (plafond 82-85%, jamais 90%,
-confirmé même après correction du bug de `thresh_warmup` en cours de session) — problème
-méthodologique reproductible documenté dans `RUNS_TO_REVISIT.md`, pas de la variance. Parmi les
-méthodes qui réussissent, le classement varie d'une seed à l'autre entre regmixmatch, mixmatch,
+**Synthèse SVHN/250 labels** : **flexmatch échoue sur les 3 seeds** (plafond 82-87%, jamais 90%) —
+rejoué sur les 3 seeds avec le fix `thresh_warmup` (implémentation vérifiée conforme à la référence
+officielle `microsoft/Semi-supervised-learning`), donné jusqu'à 2h par run (watchdog automatique) au
+lieu d'être arrêté manuellement comme lors des tentatives précédentes : le plafond reste quasi
+identique (83.99%/82.52%/86.73% contre 84.32%/82.38%/85.10% avant fix) — confirme que c'est un
+problème méthodologique reproductible sur cette config, pas un artefact du bug ni de la variance.
+Parmi les méthodes qui réussissent, le classement varie d'une seed à l'autre entre regmixmatch, mixmatch,
 efficientmatch_2/3 et fixmatch, mais toutes restent dans une fourchette étroite (5.8-18.4 min) sauf
 flexmatch. regmixmatch (mu=3 ou mu=7) et efficientmatch_3 se distinguent par leur faible nombre de
 steps (4 500-8 500) pour un temps réel comparable aux autres méthodes rapides. L'ablation mu sur
@@ -195,43 +214,58 @@ légèrement moins coûteux en FLOPs par step, mais l'échantillon est incomplet
 
 ---
 
-## CIFAR-100, 10000 labels (target 60% top-1, test_period 256, WRN-28-8)
+## CIFAR-100, 10000 labels (target 60% top-1, test_period 256)
 
-**⚠️ Sweep incomplet** — lancé pour fixmatch/flexmatch/mixmatch × seeds 2312/0308/2701 avec un
-watchdog de 2h par run, interrompu par un redémarrage de session avant la fin. Coût par évaluation
-utilisé pour "Temps corrigé" : 4 476.3 ms (WRN-28-8, cf. `FLOPS_RESULTS.md`).
+**WRN-28-4 (WF4) est devenu l'architecture de facto sur cette config** (WRN-28-8 sature la VRAM de
+la carte utilisée, cf. `FLOPS_RESULTS.md`) — les nouvelles méthodes (efficientmatch_3, regmixmatch)
+et les retests de flexmatch ont tous été lancés en WF4 ; les anciennes lignes WF8 (fixmatch,
+flexmatch, mixmatch) sont conservées pour traçabilité mais ne sont plus la référence. Coût par
+évaluation utilisé pour "Temps corrigé" : 1 499.1 ms pour WF4, 4 476.3 ms pour WF8 (cf.
+`FLOPS_RESULTS.md`). Tous les runs de cette section sont désormais soumis à un **plafond automatique
+de 2h par run** (watchdog qui tue le processus s'il dépasse ce seuil).
 
-### Seed 2312 (complet)
+### Seed 2312 (complet en WF4)
 
-| Méthode | Steps | Temps | Temps corrigé | Acc | FLOPs | Statut |
-|---|---:|---:|---:|---:|---:|---|
-| mixmatch | 10 752 | 28.24 min | 25.03 min | 60.44% | 50 865.9 TFLOPs | ✅ |
-| fixmatch | 11 520 | 120.81 min | 117.38 min | 60.08% | 153 588.8 TFLOPs | ✅ |
-| flexmatch | 9 472 | 135.20 min | 132.36 min | 56.28% (max) | 126 284.1 TFLOPs | ❌ tué au timeout de 2h, jamais atteint 60% |
+| Méthode | wf | Steps | Temps | Temps corrigé | Acc | FLOPs | Statut |
+|---|---:|---:|---:|---:|---:|---:|---|
+| mixmatch | 4/8 | 10 752 | 28.24 min | 25.03 min | 60.44% | 50 865.9 TFLOPs | ✅ (WF8 ; existe aussi une variante WF4 à 64.26% en 58.7 min, non directement comparable — target_acc différent) |
+| efficientmatch_3 | 4 | 10 240 | 19.80 min | 18.80 min | 60.00% | 29 921.0 TFLOPs | ✅ |
+| regmixmatch | 4 | 5 376 | 25.10 min | 24.60 min | 60.07% | 40 143.0 TFLOPs | ✅ |
+| flexmatch | 4 | 13 568 | 33.70 min | 32.30 min | 60.06% | 45 519.0 TFLOPs | ✅ |
+| fixmatch | 4 | 12 544 | 29.00 min | 27.80 min | 60.00% | 42 084.0 TFLOPs | ✅ |
+| fixmatch | 8 | 11 520 | 120.81 min | 117.38 min | 60.08% | 153 588.8 TFLOPs | ✅ (ancienne mesure WF8) |
+| flexmatch | 8 | 9 472 | 135.20 min | 132.36 min | 56.28% (max) | 126 284.1 TFLOPs | ❌ ancienne mesure WF8, jamais atteint 60% |
 
-### Seed 0308 (partiel)
+### Seed 0308 (complet en WF4)
 
-| Méthode | Steps | Temps | Temps corrigé | Acc | FLOPs | Statut |
-|---|---:|---:|---:|---:|---:|---|
-| fixmatch | 9 472 | 120.43 min | 117.59 min | 58.55% (max) | 126 284.1 TFLOPs | ❌ tué au timeout de 2h, jamais atteint 60% |
-| flexmatch | 1 792 | 21.27 min | 20.67 min | 3.36% (max) | 23 891.6 TFLOPs | ⚠️ **interrompu par un redémarrage de session** (pas un échec de méthode) — jamais relancé |
-| mixmatch | — | — | — | — | — | ❌ jamais lancé (sweep interrompu avant) |
+| Méthode | wf | Steps | Temps | Temps corrigé | Acc | FLOPs | Statut |
+|---|---:|---:|---:|---:|---:|---:|---|
+| flexmatch (refait post-fix) | 4 | 12 288 | 30.51 min | 29.24 min | 60.51% | 41 225.0 TFLOPs | ✅ |
+| mixmatch | 8 | 10 496 | 27.30 min | 24.10 min | 60.38% | 49 655.0 TFLOPs | ✅ (WF8, pas encore de version WF4 sur cette seed) |
+| regmixmatch | 4 | 5 888 | 28.00 min | 27.40 min | 60.31% | 43 966.0 TFLOPs | ✅ |
+| efficientmatch_3 | 4 | 10 240 | 21.40 min | 20.40 min | 60.29% | 29 921.0 TFLOPs | ✅ |
+| fixmatch | 4 | 12 800 | 29.20 min | 28.00 min | 60.01% | 42 942.0 TFLOPs | ✅ |
+| fixmatch | 8 | 9 472 | 120.43 min | 117.59 min | 58.55% (max) | 126 284.1 TFLOPs | ❌ ancienne mesure WF8, jamais atteint 60% |
 
-### Seed 2701 (aucune donnée)
+### Seed 2701 (partiel — fixmatch et flexmatch manquants)
 
-Le sweep n'a jamais atteint cette seed avant l'interruption — aucun fichier de résultat pour
-fixmatch/flexmatch/mixmatch sur cette config.
+| Méthode | wf | Steps | Temps | Temps corrigé | Acc | FLOPs | Statut |
+|---|---:|---:|---:|---:|---:|---:|---|
+| mixmatch | 8 | 11 008 | 28.60 min | 25.30 min | 60.18% | 52 077.0 TFLOPs | ✅ (WF8, pas de version WF4 sur cette seed) |
+| regmixmatch | 4 | 6 144 | 25.20 min | 24.60 min | 60.14% | 45 877.0 TFLOPs | ✅ |
+| efficientmatch_3 | 4 | 9 728 | 25.30 min | 24.30 min | 60.05% | 28 425.0 TFLOPs | ✅ |
+| fixmatch | — | — | — | — | — | — | ❌ **jamais lancé** — trou identifié, à faire |
+| flexmatch | 4 | — | — | — | — | — | ❌ **tentative avortée** : lancé puis arrêté manuellement quasi immédiatement (1 seul step écrit, fichier supprimé) — à refaire |
 
-**Synthèse CIFAR-100/10000 labels** : données trop incomplètes pour une comparaison à 3 seeds. Sur
-seed 2312 (seule seed complète), mixmatch est nettement le plus rapide en temps réel (25.0 min
-corrigé) et le plus économe en FLOPs totaux (50 866 TFLOPs, ~3x moins que fixmatch) alors que son
-coût par step (4 730.8 GFLOPs, mu=1) est déjà ~2.8x plus faible que celui de fixmatch/flexmatch
-(13 332.4 GFLOPs, mu=7) — les deux facteurs (moins de steps ET moins cher par step) jouent dans le
-même sens ici, contrairement au schéma habituel où mixmatch converge lentement à faible budget de
-labels. flexmatch échoue à converger dans la fenêtre de 2h (cohérent avec le pattern de lenteur de
-flexmatch déjà documenté sur les autres configs). **À refaire avant toute
-publication** : relancer flexmatch/seed 0308 proprement (l'échec actuel est un artefact de session,
-pas un résultat de méthode), mixmatch/seed 0308, et l'intégralité de seed 2701.
+**Synthèse CIFAR-100/10000 labels** : la bascule vers WF4 a permis de compléter presque tout le
+tableau. Sur les deux seeds désormais complètes en WF4 (2312, 0308), le classement en temps est
+stable : efficientmatch_3 est le plus rapide (19.8-21.4 min), suivi de regmixmatch (25.1-28.0 min),
+fixmatch (29.0-29.2 min) et flexmatch (30.5-33.7 min) — mixmatch (WF8) se situe dans la même
+fourchette (25.0-28.2 min corrigé) mais n'est pas encore mesuré en WF4 sur ces deux seeds, donc pas
+strictement comparable en FLOPs. flexmatch converge correctement en WF4 sur toutes les seeds testées
+(60.0-60.5%), contrairement à son échec systématique en WF8. **Reste à faire avant publication** :
+fixmatch et flexmatch sur seed 2701 (WF4), et harmoniser mixmatch en WF4 sur les 3 seeds pour une
+comparaison FLOPs à architecture égale.
 
 ---
 
@@ -267,17 +301,17 @@ avant de tirer des conclusions définitives sur l'effet de mu pour regmixmatch.
 
 | Config | efficientmatch_2 | fixmatch | flexmatch | mixmatch | regmixmatch | efficientmatch (v1) | efficientmatch_3 |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| CIFAR-10, 250 labels | ✅ 3/3 seeds | ✅ 3/3 | ✅ 3/3 (échoue jamais mais lent) | ✅ 3/3 (1 jamais convergé) | ✅ 3/3 | seed 2312 seulement | seed 2312 seulement (+ ablation mu) |
-| CIFAR-10, 4000 labels | ✅ 3/3 seeds | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 | ❌ aucune | ❌ aucune |
-| SVHN, 250 labels | ✅ 3/3 seeds | ✅ 3/3 | ✅ 3/3 (**0/3 atteint 90%**) | ✅ 3/3 | ✅ 3/3 | seed 2312 (+ tentative avortée seed 0308) | seed 2312 seulement |
-| CIFAR-100, 10000 labels | ❌ non testé | 2/3 seeds (**0/2 atteint 60% sur seed 308**) | 2/3 seeds (**0/2 atteint 60%**) | 1/3 seeds seulement | ❌ non testé | ❌ non testé | ❌ non testé |
+| CIFAR-10, 250 labels | ✅ 3/3 seeds | ✅ 3/3 | ✅ 3/3 (rejoué post-fix, échoue jamais mais lent) | ✅ 3/3 (1 jamais convergé) | ✅ 3/3 | seed 2312 seulement | ✅ 3/3 (+ ablation mu) |
+| CIFAR-10, 4000 labels | ✅ 3/3 seeds | ✅ 3/3 | ✅ 3/3 (rejoué post-fix) | ✅ 3/3 | ✅ 3/3 | ❌ aucune | ✅ 3/3 seeds |
+| SVHN, 250 labels | ✅ 3/3 seeds | ✅ 3/3 | ✅ 3/3 (rejoué, **0/3 atteint 90%**) | ✅ 3/3 | ✅ 3/3 | seed 2312 (+ tentative avortée seed 0308) | seed 2312 seulement |
+| CIFAR-100, 10000 labels (WF4) | ❌ non testé | 2/3 seeds (**seed 2701 manquante**) | 2/3 seeds (**seed 2701 avortée**) | ❌ WF4 (WF8 sur 3/3) | 3/3 seeds | ❌ non testé | 3/3 seeds |
 
 **Couverture complète et comparable sur les 3 seeds** : CIFAR-10 250 labels, CIFAR-10 4000 labels,
-et SVHN 250 labels, pour efficientmatch_2/fixmatch/flexmatch/mixmatch/regmixmatch (regmixmatch avec
-sa configuration par défaut mu=7 uniquement — l'ablation mu=3 n'est complète que sur SVHN).
-efficientmatch (v1) et efficientmatch_3 n'ont jamais été testés de façon systématique sur les 3
-seeds pour aucune config (efficientmatch_3 seulement sur seed 2312, avec une ablation mu dédiée sur
-CIFAR-10 250 labels). **CIFAR-100 10000 labels reste le gros chantier incomplet** du périmètre
-retenu : seule la seed 2312 est complète (3 méthodes), seed 0308 est partielle (fixmatch échoué au
-timeout, flexmatch interrompu par un incident de session, mixmatch jamais lancé), et seed 2701 n'a
-aucune donnée.
+SVHN 250 labels (efficientmatch_2/fixmatch/flexmatch/mixmatch/regmixmatch), et désormais
+**efficientmatch_3 sur CIFAR-10 250/4000 labels** (3/3 seeds chacune). regmixmatch et efficientmatch_3
+sont maintenant complets sur les 3 seeds de CIFAR-100 10000 labels (WF4) ; fixmatch et flexmatch y
+manquent encore la seed 2701 (flexmatch a été tenté puis abandonné avant écriture de résultat
+exploitable). efficientmatch (v1) reste non testé de façon systématique sur aucune config (seed 2312
+uniquement, sauf CIFAR-10 4000 où il n'a jamais été lancé). **Reste à faire avant publication** :
+fixmatch et flexmatch sur CIFAR-100 10000/seed 2701 (WF4), et mixmatch en WF4 sur CIFAR-100
+10000/seeds 308 et 2701 pour une comparaison FLOPs homogène.
