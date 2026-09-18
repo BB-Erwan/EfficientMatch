@@ -72,6 +72,7 @@ parser.add_argument("--test_period", type=int, default=500)
 parser.add_argument("--tau", type=float, default=0.95)
 parser.add_argument("--adaptive_threshold", type=str2bool, default=False, help="Use FlexMatch-style class-adaptive confidence thresholding (Curriculum Pseudo Labeling) instead of a fixed tau.")
 parser.add_argument("--mu", type=int, default=3, help="Unlabeled:labeled batch size ratio.")
+parser.add_argument("--mixup_weight", type=float, default=1.0, help="Weight applied to the Mixup loss term.")
 parser.add_argument("--thresh_warmup", type=str2bool, default=True, help="Only used when --adaptive_threshold is enabled: include still-unassigned samples in the per-class normalization during warmup.")
 parser.add_argument("--alpha", type=float, default=0.75)
 parser.add_argument("--T", type=float, default=0.5)
@@ -229,7 +230,7 @@ def run_efficientmatch():
 
     adaptive_threshold = args.adaptive_threshold
     thresh_warmup = args.thresh_warmup
-    method_name = "efficientmatch_3" + ("_flex" if adaptive_threshold else "") + ("_ema" if args.use_ema else "") + (f"_mu{mu}" if mu != 3 else "") + (f"_wf{args.widen_factor}" if args.widen_factor != 2 else "")
+    method_name = "efficientmatch_3" + ("_flex" if adaptive_threshold else "") + ("_ema" if args.use_ema else "") + (f"_mu{mu}" if mu != 3 else "") + (f"_mixw{args.mixup_weight}" if args.mixup_weight != 1.0 else "") + (f"_wf{args.widen_factor}" if args.widen_factor != 2 else "")
     dataset_prefix = f"{args.dataset}-"
     name_of_experiment = f"{dataset_prefix}labeled-{num_labeled}-seed-{args.seed}"
 
@@ -397,7 +398,7 @@ def run_efficientmatch():
 
             all_mixup_targets = torch.cat([mixup_targets_x, mixup_targets_u], dim=0)
 
-            loss_mixup = (
+            loss_mixup = args.mixup_weight * (
                 all_masks * F.cross_entropy(all_logits, all_mixup_targets, reduction="none")
             ).mean()
             loss = loss_supervised + loss_consistency + loss_mixup

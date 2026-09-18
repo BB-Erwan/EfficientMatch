@@ -1,3 +1,21 @@
+"""MixMatch, ported more closely to the reference implementation
+(https://github.com/microsoft/Semi-supervised-learning/blob/main/semilearn/algorithms/mixmatch/mixmatch.py)
+than the original mixmatch.py in this repo. Differences fixed relative to mixmatch.py:
+
+  1. mixup_alpha defaults to 0.5 (reference config value for CIFAR-10-250), not 0.75.
+  2. The unsup_warm_up ramp for lambda_u is normalized by a fraction of the nominal training
+     horizon (--unsup_warm_up * total_steps), matching the reference's
+     `it / (unsup_warm_up * num_train_iter)`, instead of a hardcoded 16000-step ramp.
+  3. A single scalar lam (Beta(alpha, alpha), bias-corrected via max(lam, 1-lam)) is drawn once
+     per step and shared across the whole mixed batch (labeled + both unlabeled views), matching
+     `mixup_one_target`'s single global lam -- rather than independent per-sample lam vectors for
+     the labeled and unlabeled portions.
+
+BatchNorm running-stat freezing during the pseudo-label forward pass (present in the reference via
+Bn_Controller) was deliberately left out: it only affects the eval-time BN running statistics, not
+the training gradient itself, so it's a secondary fidelity detail rather than a core part of the
+MixMatch algorithm.
+"""
 import argparse
 import json
 import logging
@@ -18,8 +36,8 @@ from torchvision.transforms import v2
 sys.path.append("..")  # add parent directory to path for imports
 
 from datasets_utils import TransformedDataset, TransformedDatasetWithIndex
-from models import WideResNet, build_model
 from utils import evaluate_f1_and_accuracy, build_lr_scheduler
+from models import WideResNet, build_model
 from ema import EMA
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -67,25 +85,26 @@ parser.add_argument("--topk", type=int, default=1, help="Also report top-k accur
 parser.add_argument("--weight_decay", type=float, default=5e-4, help="SGD weight decay. Papers use 5e-4 for CIFAR-10 and 1e-3 for CIFAR-100.")
 parser.add_argument("--num_labeled", type=int, default=250)
 parser.add_argument("--optimized", type=str2bool, default=True)
-parser.add_argument("--seed", type=int, default=42)
+parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--test_period", type=int, default=500)
 parser.add_argument("--tau", type=float, default=0.95)
+parser.add_argument("--T", type=float, default=0.5)
+parser.add_argument("--alpha", type=float, default=0.5, help="Beta distribution parameter for Mixup (mixup_alpha in the reference config).")
+parser.add_argument("--lambda_u", type=float, default=100.0, help="Max weight for the unsupervised (unlabeled) loss term (ulb_loss_ratio in the reference config).")
+parser.add_argument("--unsup_warm_up", type=float, default=0.4, help="Fraction of total_steps over which lambda_u ramps up linearly from 0 to its max value.")
 parser.add_argument("--max_steps", type=int, default=2**20, help="Number of steps actually run; the run is truncated here.")
 parser.add_argument("--total_steps", type=int, default=2**20, help="Nominal horizon the cosine LR schedule decays over, independent of max_steps.")
 parser.add_argument("--lr_schedule", type=str, default="fixmatch_cosine", choices=["fixmatch_cosine", "cosine_annealing"], help="LR schedule: rescaled FixMatch cosine (default) or torch's classic CosineAnnealingLR.")
 parser.add_argument("--verbose", type=str2bool, default=False)
 parser.add_argument("--target_acc", type=float, default=None, help="Stop the run early once test_acc reaches this value.")
 parser.add_argument("--use_ema", type=str2bool, default=True, help="Evaluate an EMA of the weights instead of the raw training weights.")
-parser.add_argument("--mu", type=int, default=7, help="Unlabeled:labeled batch size ratio.")
 parser.add_argument("--ema_decay", type=float, default=0.999)
 args = parser.parse_args()
 
 
-def run_fixmatch():
-    # ── Optimisations globales ──────────────────────────────────────────────────
-    torch.backends.cudnn.benchmark = True  # Sélectionne l'algo cuDNN le plus rapide
-    torch.set_float32_matmul_precision("high")  # TF32 sur Ampere (A4000) — matmul plus rapide
-    # ───────────────────────────────────────────────────────────────────────────
+def run_mixmatch_2():
+    torch.backends.cudnn.benchmark = True
+    torch.set_float32_matmul_precision("high")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -117,14 +136,9 @@ def run_fixmatch():
 
     num_labeled = args.num_labeled
     optimized = args.optimized
-    torch.manual_seed(args.seed)
-    # do a randperm on the training dataset to shuffle it
-    train_ds = Subset(train_ds, torch.randperm(len(train_ds)))
 
-    # Split the training data into labeled and unlabeled datasets with balanced classes
-    class_counts = torch.zeros(num_classes)
-    for _, label in train_ds:
-        class_counts[label] += 1
+    torch.manual_seed(args.seed)
+    train_ds = Subset(train_ds, torch.randperm(len(train_ds)))
 
     num_per_class = num_labeled // num_classes
     labeled_indices = []
@@ -139,51 +153,42 @@ def run_fixmatch():
     labeled_ds = Subset(train_ds, labeled_indices)
     unlabeled_ds = Subset(train_ds, unlabeled_indices)
 
-    # check class distribution in labeled dataset
     labeled_class_counts = torch.zeros(num_classes)
     for _, label in labeled_ds:
         labeled_class_counts[label] += 1
     logger.info(f"Labeled class distribution: {labeled_class_counts}")
 
-    norm_transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(mean, std)
-    ])
+    norm_transform = transforms.Compose(
+        [
+            transforms.ToTensor(),
+            transforms.Normalize(mean, std),
+        ]
+    )
 
-    weak_transform = v2.Compose([
-        v2.ToImage(),
-        v2.RandomHorizontalFlip(),
-        v2.RandomCrop(32, padding=4),
-        v2.ToDtype(torch.float32, scale=True),
-        v2.Normalize(mean, std),
-    ])
-
-    strong_transform = v2.Compose([
-        v2.RandAugment(num_ops=3, magnitude=5),
-        v2.ToImage(),
-        v2.RandomHorizontalFlip(),
-        v2.RandomCrop(32, padding=4),
-        v2.ToDtype(torch.float32, scale=True),
-        v2.Normalize(mean, std),
-    ])
+    weak_transform = v2.Compose(
+        [
+            v2.ToImage(),
+            v2.RandomHorizontalFlip(),
+            v2.RandomCrop(32, padding=4),
+            v2.ToDtype(torch.float32, scale=True),
+            v2.Normalize(mean, std),
+        ]
+    )
 
     labeled_ds = TransformedDataset(labeled_ds, transforms.ToTensor())
     unlabeled_ds = TransformedDatasetWithIndex(unlabeled_ds, transform=transforms.ToTensor())
-
     test_ds = TransformedDataset(test_ds, norm_transform)
 
-    # ── DataLoader optimisé ────────────────────────────────────────────────────
-    num_workers = min(2, os.cpu_count())  # ~2× CPU physiques
+    num_workers = min(2, os.cpu_count())
     dl_kwargs = dict(
         num_workers=num_workers,
-        pin_memory=True,  # transfert CPU→GPU DMA (plus rapide)
-        prefetch_factor=4,  # pré-charge les batchs en avance
-        persistent_workers=True,  # évite de respawn les workers à chaque epoch
+        pin_memory=True,
+        prefetch_factor=4,
+        persistent_workers=True,
     )
-    # ───────────────────────────────────────────────────────────────────────────
 
     batch_size_l = 64
-    mu = args.mu
+    mu = 1
 
     if optimized:
         labeled_loader = DataLoader(labeled_ds, batch_size=batch_size_l, shuffle=True, **dl_kwargs)
@@ -195,12 +200,9 @@ def run_fixmatch():
         test_loader = DataLoader(test_ds, batch_size=256, shuffle=False)
 
     model = build_model(args.model, num_classes, args.widen_factor, args.depth)
-
-    # ── Channels Last : layout NHWC optimal pour les Tensor Cores Ampere ───────
     model = model.to(device)
     if optimized:
         model = model.to(memory_format=torch.channels_last)
-    # ───────────────────────────────────────────────────────────────────────────
 
     # --- EMA débrayable (use_ema=False -> évalue directement les poids en cours d'entraînement) ---
     if args.use_ema:
@@ -226,20 +228,16 @@ def run_fixmatch():
     )
     scheduler = build_lr_scheduler(optimizer, total_steps, schedule=args.lr_schedule)
 
-    # if optimized and presence of triton compiler, use torch.compile to optimize the model
-    if optimized and torch.cuda.is_available() and "5060 Ti" in torch.cuda.get_device_name(0):
+    if optimized and "5060" in torch.cuda.get_device_name(0):
         try:
-            import triton
-            triton_available = True
-        except ImportError:
-            triton_available = False
-        if triton_available:
-            model = torch.compile(model, mode="reduce-overhead")
-            logger.info("torch.compile activé (mode=reduce-overhead)")
+            import triton  # noqa: F401
 
-    # -- Hyper-parameters FixMatch ---------------------------------------------
-    # tau=0.95 (confidence), mu=7 (unlabeled:labeled ratio), loss=Ls+Lu
-    method_name = "fixmatch" + (f"_mu{args.mu}" if args.mu != 7 else "") + ("_ema" if args.use_ema else "") + (f"_wf{args.widen_factor}" if args.widen_factor != 2 else "")
+            model = torch.compile(model, mode="reduce-overhead")
+            logger.info("torch.compile active (mode=reduce-overhead)")
+        except ImportError:
+            pass
+
+    method_name = "mixmatch_2" + ("_ema" if args.use_ema else "") + (f"_wf{args.widen_factor}" if args.widen_factor != 2 else "")
     dataset_prefix = f"{args.dataset}-"
     name_of_experiment = f"{dataset_prefix}labeled-{num_labeled}-seed-{args.seed}"
 
@@ -258,8 +256,7 @@ def run_fixmatch():
         "new_label": [],
         "new_correct": [],
         "bad_corrections": [],
-        "losses": [],
-        "topk_acc": []
+        "topk_acc": [],
     }
 
     last_pseudo_labels = torch.full((len(unlabeled_ds),), -1, dtype=torch.long)
@@ -270,6 +267,8 @@ def run_fixmatch():
     confidences = torch.zeros(len(unlabeled_ds), dtype=torch.float32)
 
     test_period = args.test_period
+    verbose = args.verbose
+    target_acc = args.target_acc
 
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     results_dir = os.path.join(repo_root, "results", name_of_experiment)
@@ -278,12 +277,19 @@ def run_fixmatch():
     mask_ratio = []
     losses = []
 
+    T = args.T
+    alpha = args.alpha
+    lambda_u = args.lambda_u
+    unsup_warm_up_frac = args.unsup_warm_up
+    beta_dist = torch.distributions.Beta(
+        torch.tensor(alpha, device=device, dtype=torch.float32),
+        torch.tensor(alpha, device=device, dtype=torch.float32),
+    )
+
+    use_cuda_autocast = optimized and device.type == "cuda"
+
     labeled_iter = iter(labeled_loader)
     unlabeled_iter = iter(unlabeled_loader)
-
-    tau = args.tau
-    verbose = args.verbose
-    target_acc = args.target_acc
 
     for step in range(max_steps):
         model.train()
@@ -300,69 +306,90 @@ def run_fixmatch():
             unlabeled_iter = iter(unlabeled_loader)
             x_u, y_u, idx = next(unlabeled_iter)
 
-        # Channels Last sur les inputs
         if optimized:
             x_l = weak_transform(x_l).to(device, non_blocking=True, memory_format=torch.channels_last)
             y_l = y_l.to(device, non_blocking=True)
-            x_u_w = weak_transform(x_u).to(device, non_blocking=True, memory_format=torch.channels_last)
-            x_u_s = strong_transform(x_u).to(device, non_blocking=True, memory_format=torch.channels_last)
+            x_u_w_1 = weak_transform(x_u).to(device, non_blocking=True, memory_format=torch.channels_last)
+            x_u_w_2 = weak_transform(x_u).to(device, non_blocking=True, memory_format=torch.channels_last)
         else:
             x_l = weak_transform(x_l).to(device)
             y_l = y_l.to(device)
-            x_u_w = weak_transform(x_u).to(device)
-            x_u_s = strong_transform(x_u).to(device)
+            x_u_w_1 = weak_transform(x_u).to(device)
+            x_u_w_2 = weak_transform(x_u).to(device)
 
-        # ── Pseudo-labels (no_grad + BF16) ────────────────────────────────────
-        with torch.no_grad():
-            with autocast(device_type="cuda", dtype=torch.bfloat16):
-                logits_u_w = model(x_u_w)
-            probs_u_w = F.softmax(logits_u_w.float(), dim=1)  # softmax en FP32
-            max_prob, pseudo = torch.max(probs_u_w, dim=1)
-            # Keep only pseudo-labels with confidence >= tau
-            mask = max_prob.ge(tau).float()
-            mask_ratio.append(mask.mean().item())
+        n_l = x_l.size(0)
 
-        # ── Forward fusionné : labeled + strong unlabeled en un seul pass ─────
-        optimizer.zero_grad(set_to_none=True)  # plus rapide que zero_grad()
+        mix_ctx = autocast(device_type="cuda", dtype=torch.bfloat16) if use_cuda_autocast else nullcontext()
+        with mix_ctx:
+            with torch.no_grad():
+                x_u_pair = torch.cat([x_u_w_1, x_u_w_2], dim=0)
+                all_logits = model(x_u_pair)
+                logits_u_w_1 = all_logits[:x_u_w_1.shape[0]]
+                logits_u_w_2 = all_logits[x_u_w_1.shape[0]:]
 
-        with autocast(device_type="cuda", dtype=torch.bfloat16) if optimized else nullcontext():
-            # Un seul forward pour supervised + consistency
-            batch_size_l_cur = x_l.shape[0]
-            all_logits = model(torch.cat([x_l, x_u_s], dim=0))
-            logits_l = all_logits[:batch_size_l_cur]
-            logits_u_s = all_logits[batch_size_l_cur:]
+                probs_u_w_1 = F.softmax(logits_u_w_1, dim=1)
+                probs_u_w_2 = F.softmax(logits_u_w_2, dim=1)
+                probs_avg = (probs_u_w_1 + probs_u_w_2) / 2
 
-            loss_supervised = F.cross_entropy(logits_l, y_l)
-            loss_consistency = (
-                mask * F.cross_entropy(logits_u_s, pseudo, reduction="none")
-            ).mean()
-            loss = loss_supervised + loss_consistency
+                probs_sharpened = probs_avg ** (1 / T)
+                probs_sharpened = probs_sharpened / probs_sharpened.sum(dim=1, keepdim=True)
+                probs_pair = torch.cat([probs_sharpened, probs_sharpened], dim=0)
 
-            losses.append(loss.item())
+        with mix_ctx:
+            y_l_onehot = F.one_hot(y_l, num_classes).to(dtype=probs_sharpened.dtype)
 
-        # ── Backward (pas de GradScaler nécessaire avec BF16) ─────────────────
+            all_inputs = torch.cat([x_l, x_u_pair], dim=0)
+            all_targets = torch.cat([y_l_onehot, probs_pair], dim=0)
+
+            # Reference mixup_one_target: ONE scalar lam (bias-corrected) shared by the whole
+            # mixed batch, and a single global permutation over the entire concatenated pool
+            # (labeled + both unlabeled views) -- not independent per-sample lam vectors.
+            lam = beta_dist.sample()
+            lam = torch.maximum(lam, 1 - lam)
+            index = torch.randperm(all_inputs.size(0), device=all_inputs.device)
+
+            mixed_x = torch.lerp(all_inputs[index], all_inputs, lam)
+            mixed_y = torch.lerp(all_targets[index], all_targets, lam)
+
+            # Reference forwards the labeled/unlabeled-view1/unlabeled-view2 chunks as 3
+            # separate calls (with BN running stats frozen for all but the first) so each
+            # chunk's BatchNorm normalization only sees its own num_lb-sized batch. We forward
+            # the whole mixed batch in one call instead -- same convention as mixmatch.py and
+            # every other method script here, and consistent with dropping the BN-freeze
+            # machinery (see module docstring).
+            all_logits = model(mixed_x)
+            logits_x = all_logits[:n_l]
+            logits_u = all_logits[n_l:]
+
+        loss_l = F.cross_entropy(logits_x, mixed_y[:n_l])
+
+        optimizer.zero_grad(set_to_none=True)
+        loss_u = F.mse_loss(F.softmax(logits_u.float(), dim=1), mixed_y[n_l:].float())
+        unsup_warmup = min(1.0, step / (unsup_warm_up_frac * total_steps))
+        loss = loss_l.float() + lambda_u * unsup_warmup * loss_u
         loss.backward()
         optimizer.step()
         scheduler.step()
-        # ─────────────────────────────────────────────────────────────────────
 
         if ema is not None:
             ema.update(base_model)
 
-        # update pseudo_labels passing throught the mask to avoid updating pseudo_labels for low confidence samples
-        pseudo_labels[idx] = torch.where(mask.bool().cpu(), pseudo.cpu(), pseudo_labels[idx])
-        confidences[idx] = torch.where(mask.bool().cpu(), max_prob.cpu(), confidences[idx])
+        idx_cpu = idx.cpu()
+        pseudo_labels[idx_cpu] = torch.argmax(probs_avg, dim=1).cpu()
+        confidences[idx_cpu] = torch.max(probs_avg, dim=1).values.cpu()
+
+        mask_ratio.append(1.0)
 
         if (step + 1) % test_period == 0 or step == 0 or step == max_steps - 1:
             if ema is not None:
                 ema.copy_to(eval_model)
-            f1, acc, topk_accs = evaluate_f1_and_accuracy(eval_model, test_loader, device, args.topk)
+            f1, acc, topk_accs = evaluate_f1_and_accuracy(eval_model, test_loader, device=device, topk=args.topk)
             metrics["step"].append(step + 1)
             metrics["test_f1"].append(f1)
             metrics["test_acc"].append(acc)
             metrics["time_elapsed"].append(time.time() - start_time)
-            metrics["mask_ratio"].append(np.mean(mask_ratio))
-            metrics["train_loss"].append(np.mean(losses))
+            metrics["mask_ratio"].append(float(np.mean(mask_ratio)) if mask_ratio else 0.0)
+            metrics["train_loss"].append(float(np.mean(losses + [loss.item()])))
             metrics["topk_acc"].append(topk_accs)
             mask_ratio = []
             losses = []
@@ -393,15 +420,16 @@ def run_fixmatch():
             if target_acc is not None and acc >= target_acc:
                 logger.info(f"Reached target_acc={target_acc:.4f} at step {step + 1} (acc={acc:.4f}) — stopping early.")
                 break
-        elif verbose:
-            print(
-                f"Step {step + 1}/{max_steps}, Loss: {loss.item():.4f}, "
-                f"Sup: {loss_supervised.item():.4f}, Cons: {loss_consistency.item():.4f}, "
-                f"Mask Ratio: {mask_ratio[-1]:.4f}",
-                end="\r",
-                flush=True,
-            )
+        else:
+            losses.append(loss.item())
+            if verbose:
+                print(
+                    f"Step {step + 1}/{max_steps}, Loss: {loss.item():.4f}, "
+                    f"loss_l: {loss_l.item():.4f}, loss_u: {loss_u.item():.4f}",
+                    end="\r",
+                    flush=True,
+                )
 
 
 if __name__ == "__main__":
-    run_fixmatch()
+    run_mixmatch_2()
