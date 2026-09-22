@@ -1,21 +1,22 @@
 # Expérience principale
 
 Sweep de référence retenu pour l'article : **5 méthodes** (efficientmatch_3 avec mu=3 par défaut,
-fixmatch, flexmatch, mixmatch, regmixmatch avec mu=7 par défaut) sur **4 configurations** (SVHN 250
-labels, CIFAR-10 250 labels, CIFAR-10 4000 labels, CIFAR-100 10000 labels) et **3 seeds** (2312,
-0308, 2701). Toute variante d'ablation (mu différent, efficientmatch v1/flex/2, sequencematch,
-regmixmatch_mu3, runs interrompus ou hors seeds retenues) est **volontairement exclue** de ce
-document — elle reste documentée dans `SEEDS_2312_308_2701_INVENTORY.md` (historique complet) et
-`EXPERIMENT_LOG.md`.
+fixmatch, flexmatch, mixmatch, regmixmatch avec mu=7 par défaut) sur **5 configurations** (SVHN 250
+labels, CIFAR-10 250 labels, CIFAR-10 4000 labels, CIFAR-100 10000 labels, CIFAR-100 2500 labels)
+et **3 seeds** (2312, 0308, 2701). Toute variante d'ablation (mu différent, efficientmatch
+v1/flex/2, sequencematch, regmixmatch_mu3, runs interrompus ou hors seeds retenues) est
+**volontairement exclue** de ce document — elle reste documentée dans
+`SEEDS_2312_308_2701_INVENTORY.md` (historique complet) et `EXPERIMENT_LOG.md`.
 
-**CIFAR-100 10000 labels est reporté exclusivement en WRN-28-4 (WF4)**, l'architecture de facto sur
-cette config (WRN-28-8 sature la VRAM de la carte utilisée, cf. `FLOPS_RESULTS.md`) ; les anciennes
-mesures WRN-28-8 ne figurent pas ici. Les 3 autres configs sont en WRN-28-2 (architecture par défaut).
+**CIFAR-100 (10000 et 2500 labels) est reporté exclusivement en WRN-28-4 (WF4)**, l'architecture de
+facto sur ces configs (WRN-28-8 sature la VRAM de la carte utilisée, cf. `FLOPS_RESULTS.md`) ; les
+anciennes mesures WRN-28-8 ne figurent pas ici. Les 3 autres configs sont en WRN-28-2 (architecture
+par défaut).
 
 **Cibles (target_acc)** : SVHN 250 → 90%, CIFAR-10 250 → 80%, CIFAR-10 4000 → 90%, CIFAR-100 10000 →
-60%. Puisque toutes les méthodes d'une même config partagent la même cible, **l'accuracy finale
-n'est pas un critère de comparaison pertinent** (c'est le critère d'arrêt) — la métrique qui compte
-est le **temps** (et les FLOPs).
+60%, CIFAR-100 2500 → 50%. Puisque toutes les méthodes d'une même config partagent la même cible,
+**l'accuracy finale n'est pas un critère de comparaison pertinent** (c'est le critère d'arrêt) — la
+métrique qui compte est le **temps** (et les FLOPs).
 
 **Temps corrigé** = temps brut − (nombre d'évaluations × coût moyen d'une évaluation), coût mesuré
 en conditions réelles (cf. `FLOPS_RESULTS.md` §"Coût d'une évaluation") : 553.7 ms pour WRN-28-2,
@@ -190,6 +191,50 @@ désormais complète sur les 3 seeds pour les 5 méthodes.**
 
 ---
 
+## CIFAR-100, 2500 labels (target 50%, WRN-28-4)
+
+### Seed 2312
+
+| Méthode | Steps | Temps | Temps corrigé | Acc | FLOPs |
+|---|---:|---:|---:|---:|---:|
+| regmixmatch | 19 200 | 87.5 min | 85.6 min | 51.41% | 143 367 TFLOPs |
+| flexmatch | 31 500 | 70.8 min | 69.2 min | 50.25% | 105 679 TFLOPs |
+| efficientmatch_3 | 30 464 | 58.1 min | 55.1 min | 50.11% | 89 014 TFLOPs |
+| fixmatch | 54 000 | 119.2 min | 116.5 min | 46.81% (max) | 181 164 TFLOPs — ❌ jamais atteint 50% |
+| mixmatch | 84 000 | 67.9 min | 63.7 min | 46.35% (max) | 99 996 TFLOPs — ❌ jamais atteint 50% |
+
+### Seed 0308
+
+| Méthode | Steps | Temps | Temps corrigé | Acc | FLOPs |
+|---|---:|---:|---:|---:|---:|
+| flexmatch | 38 000 | 84.8 min | 82.8 min | 50.99% | 127 485 TFLOPs |
+| regmixmatch | 15 000 | 53.3 min | 52.5 min | 50.50% | 112 005 TFLOPs |
+| efficientmatch_3 | 26 500 | 49.5 min | 48.1 min | 50.12% | 77 431 TFLOPs |
+| fixmatch | 48 500 | 107.3 min | 104.8 min | 48.13% (max) | 162 712 TFLOPs — ❌ jamais atteint 50% |
+| mixmatch | 125 000 | 98.4 min | 92.1 min | 46.48% (max) | 148 804 TFLOPs — ❌ jamais atteint 50% |
+
+### Seed 2701
+
+| Méthode | Steps | Temps | Temps corrigé | Acc | FLOPs |
+|---|---:|---:|---:|---:|---:|
+| regmixmatch | 20 000 | 71.1 min | 70.1 min | 50.56% | 149 340 TFLOPs |
+| flexmatch | 31 500 | 69.6 min | 68.0 min | 50.45% | 105 679 TFLOPs |
+| efficientmatch_3 | 32 000 | 59.6 min | 58.0 min | 50.40% | 93 502 TFLOPs |
+| fixmatch | 53 000 | 116.0 min | 113.4 min | 47.04% (max) | 177 809 TFLOPs — ❌ jamais atteint 50% |
+| mixmatch | 34 500 | 27.5 min | 25.8 min | 43.71% (max) | 41 070 TFLOPs — ⏸️ **run en pause, interrompue manuellement (pas un plafond), à reprendre** |
+
+**Synthèse** : **efficientmatch_3 est systématiquement le plus rapide et le moins coûteux en
+FLOPs** parmi les méthodes qui convergent (48.1-58.1 min corrigé, 77-93k TFLOPs), devant regmixmatch
+et flexmatch (classement variable selon la seed, 48.1-85.6 min). **fixmatch et mixmatch échouent
+systématiquement à atteindre 50%** sur les 3 seeds, plafonnant respectivement autour de 46-48% et
+43-46% avant d'être arrêtés par le plafond watchdog de 2h — contrairement à CIFAR-100 10000 labels
+(target 60%) où fixmatch converge normalement ; le régime à 2500 labels (25/classe sur 100 classes)
+semble être un point de rupture pour ces deux méthodes sur cette architecture. La run mixmatch seed
+2701 reste incomplète (interrompue en session, pas par le watchdog) — à reprendre avant conclusion
+définitive sur cette seed, la tendance étant déjà cohérente sur 2/3 seeds.
+
+---
+
 ## Vue d'ensemble
 
 | Config | efficientmatch_3 | fixmatch | flexmatch | mixmatch | regmixmatch |
@@ -198,8 +243,7 @@ désormais complète sur les 3 seeds pour les 5 méthodes.**
 | CIFAR-10, 250 labels | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 (1 jamais convergé) | ✅ 3/3 |
 | CIFAR-10, 4000 labels | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 |
 | CIFAR-100, 10000 labels (WF4) | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 |
+| CIFAR-100, 2500 labels (WF4) | ✅ 3/3 | ✅ 3/3 (**0/3 atteint 50%**) | ✅ 3/3 | ⏸️ 2/3 (0/2 atteint 50%, seed 2701 en pause) | ✅ 3/3 |
 
-**Couverture complète sur les 3 seeds pour les 4 configs et les 5 méthodes.** Aucun trou restant
-dans le périmètre retenu pour l'article.
-flexmatch sur seed 2701, et mixmatch sur seeds 308 et 2701. **Reste à faire avant publication** :
-ces 4 runs manquants sur CIFAR-100 10000 labels/WF4.
+**Couverture complète sur les 3 seeds pour 4 des 5 configs.** Reste à faire avant publication :
+reprendre et terminer la run mixmatch seed 2701 sur CIFAR-100 2500 labels/WF4.
