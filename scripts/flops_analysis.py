@@ -25,6 +25,7 @@ import torch.nn.functional as F
 from torch.utils.flop_counter import FlopCounterMode
 
 from models import WideResNet
+from run_analysis import freematch_threshold_flops
 
 NUM_CLASSES = 10
 IMAGE_SIZE = 32
@@ -39,6 +40,9 @@ MU = {
     "efficientmatch": 3,
     "efficientmatch_2": 3,
     "efficientmatch_3": 3,
+    "efficientmatch_freematch": 3,
+    "efficientmatch_freematch_svhn": 3,
+    "efficientmatch_freematch_c100": 3,
     "efficientmatch_3_mu1": 1,
     "efficientmatch_3_mu5": 5,
     "efficientmatch_3_mu7": 7,
@@ -193,6 +197,19 @@ def efficientmatch_3_iter_flops(model, device, mu=None):
     return efficientmatch_iter_flops(model, device, mu)
 
 
+def efficientmatch_freematch_iter_flops(model, device, mu=None, num_classes=NUM_CLASSES, svhn_clamp=False):
+    """efficientmatch_3 + FreeMatch's self-adaptive thresholding (--freematch_threshold).
+
+    Same model() call sequence as efficientmatch_3 (measured by FlopCounterMode, which only counts
+    conv/matmul FLOPs), PLUS the element-wise operations of the thresholding (EMA trackers, mean,
+    max, product, compare), which FlopCounterMode does not see and are therefore counted by hand
+    in run_analysis.freematch_threshold_flops (dependent on the number of classes and on the SVHN
+    clamp)."""
+    mu = mu if mu is not None else MU["efficientmatch_freematch"]
+    model_flops = efficientmatch_iter_flops(model, device, mu)
+    return model_flops + freematch_threshold_flops(mu * BATCH_SIZE_L, num_classes, svhn_clamp)
+
+
 def regmixmatch_iter_flops(model, device, mu=None):
     """As actually run in this repo (--static_shapes True, --disab_cam True, the defaults used
     for every regmixmatch experiment): 2 forward+backward calls, no separate no_grad pseudo-label
@@ -266,6 +283,9 @@ METHODS = {
     "efficientmatch": efficientmatch_iter_flops,
     "efficientmatch_2": efficientmatch_2_iter_flops,
     "efficientmatch_3": efficientmatch_3_iter_flops,
+    "efficientmatch_freematch": efficientmatch_freematch_iter_flops,
+    "efficientmatch_freematch_svhn": partial(efficientmatch_freematch_iter_flops, svhn_clamp=True),
+    "efficientmatch_freematch_c100": partial(efficientmatch_freematch_iter_flops, num_classes=100),
     "efficientmatch_3_mu1": partial(efficientmatch_3_iter_flops, mu=MU["efficientmatch_3_mu1"]),
     "efficientmatch_3_mu5": partial(efficientmatch_3_iter_flops, mu=MU["efficientmatch_3_mu5"]),
     "efficientmatch_3_mu7": partial(efficientmatch_3_iter_flops, mu=MU["efficientmatch_3_mu7"]),

@@ -212,6 +212,7 @@ parser.add_argument("--lambda_u", type=float, default=1.0, help="Weight of the F
 parser.add_argument("--lambda_e", type=float, default=0.01, help="Weight of the self-adaptive fairness (entropy) loss.")
 parser.add_argument("--hard_label", type=str2bool, default=True, help="Use the argmax pseudo-label (vs. a temperature-sharpened soft target) for the consistency loss.")
 parser.add_argument("--T", type=float, default=0.5, help="Sharpening temperature, only used when --hard_label is false.")
+parser.add_argument("--svhn_clamp", type=str2bool, default=True, help="Clamp the FreeMatch adaptive threshold to [0.9, 0.95] on SVHN, as the upstream RegMixMatch/FreeMatch code does. Set to false to use the raw adaptive threshold on SVHN too (results are then saved as regmixmatch_noclamp_*).")
 parser.add_argument("--disab_cam", type=str2bool, default=True, help="Disable the confidence-routed patch loss (cam_loss) on low-confidence samples. The upstream authors found it unreliable and recommend leaving it disabled.")
 parser.add_argument("--alpha_h", type=float, default=1.0, help="Beta-distribution concentration for the confident-pool ResizeMix box (larger = smaller/rarer boxes).")
 parser.add_argument("--alpha_l", type=float, default=16.0, help="Beta-distribution concentration for the uncertain-sample patch box.")
@@ -374,7 +375,7 @@ def run_regmixmatch():
     alpha_l = args.alpha_l
     confident_pool_full = (num_labeled / num_classes) >= 100  # rich-label regime: mix confident pool + labeled data
 
-    method_name = "regmixmatch" + (f"_mu{args.mu}" if args.mu != 7 else "") + ("_ema" if args.use_ema else "") + (f"_wf{args.widen_factor}" if args.widen_factor != 2 else "")
+    method_name = "regmixmatch" + ("_noclamp" if not args.svhn_clamp else "") + (f"_mu{args.mu}" if args.mu != 7 else "") + ("_ema" if args.use_ema else "") + (f"_wf{args.widen_factor}" if args.widen_factor != 2 else "")
     dataset_prefix = f"{args.dataset}-"
     name_of_experiment = f"{dataset_prefix}labeled-{num_labeled}-seed-{args.seed}"
 
@@ -503,7 +504,7 @@ def run_regmixmatch():
 
                 p_model_cutoff = p_model / p_model.max()
                 threshold = time_p * p_model_cutoff[pseudo]
-                if args.dataset == "svhn":
+                if args.dataset == "svhn" and args.svhn_clamp:
                     threshold = torch.clamp(threshold, min=0.9, max=0.95)
                 mask = max_probs.ge(threshold)
                 valid = max_probs >= tau_m  # the "confident" pool feeding the ResizeMix supervision

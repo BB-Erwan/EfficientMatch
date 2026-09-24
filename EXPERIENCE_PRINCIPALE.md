@@ -51,6 +51,7 @@ rapportée est le maximum atteint avant coupure (marqué "jamais atteint la cibl
 | mixmatch | 52 500 | 18.4 min | 17.4 min | 91.06% | 15 836 TFLOPs |
 | efficientmatch_3 | 6 500 | 5.3 min | 5.2 min | 90.45% | 4 812 TFLOPs |
 | regmixmatch | 4 500 | 8.2 min | 8.2 min | 90.30% | 8 513 TFLOPs |
+| efficientmatch_freematch (variante) | 6 000 | 4.9 min | 4.8 min | 90.11% | 4 442 TFLOPs |
 | fixmatch | 6 500 | 6.4 min | 6.3 min | 90.07% | 5 526 TFLOPs |
 | flexmatch | 92 000 | 94.3 min | 92.6 min | 82.52% (max) | 78 209 TFLOPs — ❌ jamais atteint 90% (tué à 2h) |
 
@@ -62,6 +63,7 @@ rapportée est le maximum atteint avant coupure (marqué "jamais atteint la cibl
 | regmixmatch | 6 000 | 11.3 min | 11.2 min | 90.37% | 11 351 TFLOPs |
 | fixmatch | 8 000 | 7.9 min | 7.7 min | 90.18% | 6 801 TFLOPs |
 | efficientmatch_3 | 8 000 | 6.5 min | 6.3 min | 90.15% | 5 923 TFLOPs |
+| efficientmatch_freematch (variante) | 6 000 | 4.9 min | 4.8 min | 90.03% | 4 442 TFLOPs |
 | flexmatch | 57 500 | 59.4 min | 58.4 min | 86.73% (max) | 48 881 TFLOPs — ❌ jamais atteint 90% (tué à 2h) |
 
 **Synthèse** : **flexmatch échoue sur les 3 seeds** (plafond 83-87%, jamais 90%, tué par le watchdog
@@ -92,6 +94,7 @@ dans une fourchette étroite (5.2-18.4 min).
 | Méthode | Steps | Temps | Temps corrigé | Acc | FLOPs |
 |---|---:|---:|---:|---:|---:|
 | efficientmatch_3 | 28 500 | 20.9 min | 20.3 min | 80.37% | 21 100 TFLOPs |
+| efficientmatch_freematch (variante) | 21 500 | 15.7 min | 15.3 min | 80.27% | 15 918 TFLOPs |
 | flexmatch | 52 500 | 52.3 min | 51.3 min | 80.16% | 44 630 TFLOPs |
 | mixmatch | 883 000 | 276.6 min (4h37) | 260.3 min | 80.07% | 266 348 TFLOPs |
 | regmixmatch | 25 500 | 44.3 min | 43.8 min | 80.02% | 48 242 TFLOPs |
@@ -106,6 +109,7 @@ dans une fourchette étroite (5.2-18.4 min).
 | flexmatch | 42 000 | 41.5 min | 40.7 min | 80.17% | 35 704 TFLOPs |
 | fixmatch | 61 500 | 57.4 min | 56.3 min | 80.15% | 52 281 TFLOPs |
 | mixmatch | 464 500 | 145.6 min (2h26) | 137.0 min | 80.10% | 140 112 TFLOPs |
+| efficientmatch_freematch (variante) | 19 500 | 14.2 min | 13.9 min | 80.07% | 14 437 TFLOPs |
 
 **Synthèse** : **efficientmatch_3 est systématiquement le plus rapide** (18.3-30.4 min), suivi de
 flexmatch et regmixmatch (classement variable selon la seed). **mixmatch est nettement le point
@@ -135,6 +139,7 @@ méthodologique systématique.
 
 | Méthode | Steps | Temps | Temps corrigé | Acc | FLOPs |
 |---|---:|---:|---:|---:|---:|
+| efficientmatch_freematch (variante) | 28 500 | 20.2 min | 19.7 min | 90.12% | 21 100 TFLOPs |
 | efficientmatch_3 | 41 000 | 30.1 min | 29.3 min | 90.02% | 30 354 TFLOPs |
 | mixmatch | 213 500 | 63.6 min | 59.6 min | 90.05% | 64 400 TFLOPs |
 | regmixmatch | 27 000 | 46.7 min | 46.2 min | 90.02% | 51 080 TFLOPs |
@@ -145,15 +150,19 @@ méthodologique systématique.
 
 | Méthode | Steps | Temps | Temps corrigé | Acc | FLOPs |
 |---|---:|---:|---:|---:|---:|
-| efficientmatch_3 | 43 000 | 41.1 min | 40.3 min | 90.03% | 31 835 TFLOPs |
+| efficientmatch_3 (rejoué, temps propre) | 43 500 | 30.6 min | 29.8 min | 90.09% | 32 205 TFLOPs |
+| efficientmatch_freematch (variante) | 31 000 | 22.0 min | 21.4 min | 90.05% | 22 951 TFLOPs |
 | regmixmatch | 27 000 | 47.7 min | 47.2 min | 90.06% | 51 080 TFLOPs |
 | mixmatch | 165 500 | 49.3 min | 46.3 min | 90.04% | 49 921 TFLOPs |
 | flexmatch | 83 500 | 78.3 min | 76.8 min | 90.03% | 70 983 TFLOPs |
 | fixmatch | 100 500 | 88.8 min | 86.9 min | 90.15% | 85 435 TFLOPs |
 
 **Synthèse** : **efficientmatch_3 est systématiquement le plus rapide et le plus économe en FLOPs**
-(29.0-41.1 min, 30.4-31.8k TFLOPs), suivi de regmixmatch et mixmatch en milieu de classement.
-flexmatch et fixmatch restent les plus lents, sans ordre stable entre eux selon la seed.
+parmi les 5 méthodes de référence (29.0-30.1 min, 30.4-32.2k TFLOPs), suivi de regmixmatch et
+mixmatch en milieu de classement. flexmatch et fixmatch restent les plus lents, sans ordre stable
+entre eux selon la seed. La run efficientmatch_3 de la seed 2701 a été rejouée : la première
+mesure (41.1 min, 57 ms/step) était gonflée d'environ 30% par la machine, le temps propre est de
+30.6 min à 42 ms/step (cf. "Fiabilité des temps" ci-dessous).
 
 ---
 
@@ -203,7 +212,7 @@ désormais complète sur les 3 seeds pour les 5 méthodes.**
 
 | Méthode | Steps | Temps | Temps corrigé | Acc | FLOPs |
 |---|---:|---:|---:|---:|---:|
-| regmixmatch | 19 200 | 87.5 min | 85.6 min | 51.41% | 143 367 TFLOPs |
+| regmixmatch (rejoué, temps propre) | 17 500 | 61.9 min | 61.0 min | 50.41% | 130 673 TFLOPs |
 | flexmatch | 31 500 | 70.8 min | 69.2 min | 50.25% | 105 679 TFLOPs |
 | efficientmatch_freematch (variante) | 16 000 | 29.8 min | 29.0 min | 50.18% | 46 751 TFLOPs |
 | efficientmatch_3 | 30 464 | 58.1 min | 55.1 min | 50.11% | 89 014 TFLOPs |
@@ -214,6 +223,7 @@ désormais complète sur les 3 seeds pour les 5 méthodes.**
 
 | Méthode | Steps | Temps | Temps corrigé | Acc | FLOPs |
 |---|---:|---:|---:|---:|---:|
+| efficientmatch_freematch (variante) | 14 500 | 27.1 min | 26.3 min | 51.04% | 42 368 TFLOPs |
 | flexmatch | 38 000 | 84.8 min | 82.8 min | 50.99% | 127 485 TFLOPs |
 | regmixmatch | 15 000 | 53.3 min | 52.5 min | 50.50% | 112 005 TFLOPs |
 | efficientmatch_3 | 26 500 | 49.5 min | 48.1 min | 50.12% | 77 431 TFLOPs |
@@ -224,6 +234,7 @@ désormais complète sur les 3 seeds pour les 5 méthodes.**
 
 | Méthode | Steps | Temps | Temps corrigé | Acc | FLOPs |
 |---|---:|---:|---:|---:|---:|
+| efficientmatch_freematch (variante) | 16 000 | 29.7 min | 28.9 min | 50.60% | 46 751 TFLOPs |
 | regmixmatch | 20 000 | 71.1 min | 70.1 min | 50.56% | 149 340 TFLOPs |
 | flexmatch | 31 500 | 69.6 min | 68.0 min | 50.45% | 105 679 TFLOPs |
 | efficientmatch_3 | 32 000 | 59.6 min | 58.0 min | 50.40% | 93 502 TFLOPs |
@@ -232,7 +243,9 @@ désormais complète sur les 3 seeds pour les 5 méthodes.**
 
 **Synthèse** : **efficientmatch_3 est systématiquement le plus rapide et le moins coûteux en
 FLOPs** parmi les méthodes qui convergent (48.1-58.1 min corrigé, 77-93k TFLOPs), devant regmixmatch
-et flexmatch (classement variable selon la seed, 48.1-85.6 min). **fixmatch et mixmatch échouent
+et flexmatch (classement variable selon la seed, 52.5-82.8 min ; regmixmatch, rejoué sur la seed
+2312 avec un temps propre de 61.0 min, passe derrière efficientmatch_3 au lieu des 85.6 min
+gonflés de la première mesure). **fixmatch et mixmatch échouent
 systématiquement à atteindre 50%** sur les 3 seeds, plafonnant respectivement autour de 46-48% et
 45-47% avant d'être arrêtés par le plafond watchdog de 2h (sur les 3 seeds pour les deux méthodes) —
 contrairement à CIFAR-100 10000 labels (target 60%) où fixmatch converge normalement ; le régime à
@@ -253,23 +266,71 @@ max(p_model)`, avec `time_p` et `p_model` suivis par EMA (0.999) sur les prédic
 initialisés à 1/nb_classes (init standard de FreeMatch — `regmixmatch.py` utilise à la place un
 échauffement supervisé de 2048 pas, non reproduit ici pour garder le budget d'entraînement
 inchangé), et borné à [0.9, 0.95] sur SVHN. Le masque adaptatif sert à la fois à la loss de
-cohérence et au filtrage du Mixup. Coût par itération identique à efficientmatch_3 (aucun appel de
-modèle supplémentaire). Même cible et même plafond 2h que les méthodes de référence.
+cohérence et au filtrage du Mixup. Même cible et même plafond 2h que les méthodes de référence.
 
-**Seed 2312 (seule seed terminée à ce stade ; seeds 0308 et 2701 en cours)** — écart vs
-efficientmatch_3 :
+**FLOPs exacts.** Le seuillage n'ajoute aucun appel de modèle, mais des opérations élémentaires
+par itération (moyenne de confiance, deux EMA, max, produit, comparaisons) que `FlopCounterMode`
+(conv/matmul uniquement) ne voit pas ; elles sont comptées à la main (1 FLOP par addition,
+multiplication, division, comparaison ou max ; indexation et copies = 0 ; le `>=` final est déjà
+présent avec un tau fixe, donc pas un surcoût) dans `run_analysis.freematch_threshold_flops`, et
+ajoutées au coût mesuré du modèle dans `flops_analysis.py` :
 
-| Config | Steps | Temps corrigé | TFLOPs | Écart de temps vs efficientmatch_3 |
+| Architecture / config | efficientmatch_3 | efficientmatch_freematch | Surcoût du seuillage |
+|---|---:|---:|---:|
+| WRN-28-2, CIFAR-10 (10 classes) | 740 351 508 480 FLOPs/it | 740 351 510 836 | +2 356 (3.2e-9 relatif) |
+| WRN-28-2, SVHN (10 classes, borne active) | 740 351 508 480 | 740 351 511 220 | +2 740 (3.7e-9) |
+| WRN-28-4, CIFAR-100 (100 classes) | 2 921 930 883 072 | 2 921 930 903 158 | +20 086 (6.9e-9) |
+
+Sur une run complète le seuillage représente au plus 3.2e8 FLOPs (CIFAR-100 2500), soit ~3e-4 TFLOPs :
+les TFLOPs des tableaux ci-dessus (arrondis à l'unité) sont donc identiques à ceux d'un calcul
+sans le surcoût — c'est le résultat exact, pas une approximation.
+
+**Gain vs efficientmatch_3, 3 seeds** (steps = métrique indépendante du matériel ; le temps corrigé
+donne des écarts quasi identiques) :
+
+| Config | Seed 2312 | Seed 0308 | Seed 2701 | Moyenne |
 |---|---:|---:|---:|---:|
-| SVHN, 250 labels | 6 000 (vs 7 000) | 4.8 min (vs 5.7) | 4 442 (vs 5 182) | **-15%** |
-| CIFAR-10, 250 labels | 41 500 (vs 42 000) | 29.0 min (vs 29.6) | 30 725 (vs 31 095) | -2% |
-| CIFAR-10, 4000 labels | 25 500 (vs 41 000) | 17.7 min (vs 28.2) | 18 879 (vs 30 354) | **-37%** |
-| CIFAR-100, 2500 labels (WF4) | 16 000 (vs 30 464) | 29.0 min (vs 55.1) | 46 751 (vs 89 014) | **-47%** |
+| SVHN, 250 labels (borne active) | -14% | -8% | -25% | -16% |
+| CIFAR-10, 250 labels | -1% | -25% | -22% | -16% |
+| CIFAR-10, 4000 labels | -38% | -31% | -29% | -32% |
+| CIFAR-100, 2500 labels (WF4) | -47% | -45% | -50% | -48% |
 
-Sur cette seed, la variante est la plus rapide et la moins coûteuse en FLOPs de toutes les
-méthodes sur les 4 configs, mais sa marge sur efficientmatch_3 est négligeable sur CIFAR-10 250
-labels (-2%) et forte partout ailleurs (-15% à -47%). Une seule seed : à confirmer sur 0308 et
-2701 avant toute conclusion.
+La variante est la plus rapide et la moins coûteuse en FLOPs de toutes les méthodes sur les 12
+combinaisons config × seed. Le gain croît avec le nombre de labels et de classes (~-16% sur SVHN
+et CIFAR-10 250, -32% sur CIFAR-10 4000, -48% sur CIFAR-100 2500) ; il est très variable d'une
+seed à l'autre sur CIFAR-10 250 (de -1% à -25%).
+
+**La borne [0.9, 0.95] sur SVHN est indispensable.** Elle vient du code de référence (FreeMatch /
+RegMixMatch : `freematch_utils.consistency_loss`), que `regmixmatch.py` reproduit et que la variante
+reprend. Sans elle (`--freematch_svhn_clamp false`, résultats `efficientmatch_freematch_noclamp_*`),
+la variante n'atteint jamais 90% sur les 3 seeds : maximum de 85.5% (seed 2312, arrêtée à la main
+après 51 min), 84.2% (0308, coupée à 25 min) et 86.3% (2701, coupée à 25 min), puis lente
+dégradation vers 82-83% (masque ~84% des échantillons, qualité des pseudo-labels ~0.81 contre 0.88
+avec la borne à step égal). Le seuil adaptatif seul (moyenne de confiance suivie par EMA) reste
+trop bas sur SVHN : trop de pseudo-labels faux entrent dans le masque et le modèle se renforce sur
+ses erreurs. Même comportement pour regmixmatch sans borne (`--svhn_clamp false`, seed 2312,
+2h) : plafond à 84.65% au step 19 000 (33.6 min), 81.8% à 70 500 steps (119 min), contre 90.51% en
+5 500 steps / 10.3 min avec la borne. Ces runs sont des diagnostics (budget de 25 min à 2h, hors
+plafond 2h uniforme) et ne font pas partie des tableaux de référence.
+
+---
+
+## Fiabilité des temps (runs rejouées)
+
+Les steps et les FLOPs sont déterministes ; le **temps d'horloge** ne l'est pas. Un contrôle du temps
+par step sur toutes les runs a montré que la machine a parfois tourné 20 à 200% plus lentement
+qu'à l'habitude, sans autre run concurrente enregistrée (cause non identifiée : charge externe ou
+état du GPU). Runs de l'expérience principale concernées (temps par step >20% au-dessus de la
+médiane de la même méthode et config) :
+
+| Run | ms/step | Médiane | Traitement |
+|---|---:|---:|---|
+| efficientmatch_3, CIFAR-10 4000, seed 2701 | 57.4 | 44 | **rejouée** : 30.6 min à 42 ms/step (au lieu de 41.1 min) |
+| regmixmatch, CIFAR-100 2500, seed 2312 | 273 | 213 | **rejouée** : 61.9 min à 212 ms/step (au lieu de 87.5 min) |
+| mixmatch, CIFAR-10 250, seed 2312 | 56.5 | 18.8 | **non rejouée** (plafond 2h impossible à tenir) : temps estimé à vitesse nominale ≈ 260 min au lieu de 779 min ; steps (827 500) et accuracy inchangés |
+| efficientmatch_3, CIFAR-100 10000, seed 2701 | 156 | 126 | non rejouée : temps estimé ≈ 20 min au lieu de 25.3 min |
+
+Les deux reruns ont remplacé les anciens résultats (récupérables via l'historique git).
 
 ---
 
@@ -284,4 +345,6 @@ labels (-2%) et forte partout ailleurs (-15% à -47%). Une seule seed : à confi
 | CIFAR-100, 2500 labels (WF4) | ✅ 3/3 | ✅ 3/3 (**0/3 atteint 50%**) | ✅ 3/3 | ✅ 3/3 (**0/3 atteint 50%**) | ✅ 3/3 |
 
 **Couverture complète sur les 3 seeds pour les 5 configs et les 5 méthodes.** Aucun trou restant
-dans le périmètre retenu pour l'article.
+dans le périmètre retenu pour l'article. La variante efficientmatch_freematch est également
+complète (3 seeds) sur SVHN 250, CIFAR-10 250, CIFAR-10 4000 et CIFAR-100 2500 (pas sur
+CIFAR-100 10000).
