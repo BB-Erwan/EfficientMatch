@@ -34,10 +34,12 @@ convention of keeping every validated figure there rather than only in a scratch
 """
 import argparse
 import json
+import math
 import os
 import sys
 
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter, MaxNLocator
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESULTS_ROOT = os.path.join(REPO_ROOT, "results")
@@ -100,6 +102,12 @@ def main():
     ap.add_argument("--xaxis", choices=["time", "steps", "flops"], default="time", help="What to plot accuracy against.")
     ap.add_argument("--widen_factor", type=int, default=None, help="Architecture for FLOPs lookup. Defaults to 4 for cifar100, 2 otherwise.")
     ap.add_argument("--xmax", type=float, default=None, help="Max x-axis. Defaults to the longest run's last value on that axis.")
+    ap.add_argument("--xmin", type=float, default=0.0)
+    ap.add_argument("--auto_xmax", action="store_true", help="Zoom the x-axis on the methods that reach the target (extreme outliers, >2.5x the median end, and methods that never converge just trail off the edge); time is still capped at 120 min.")
+    ap.add_argument("--auto_xmin", action="store_true", help="Start the x-axis where the first curve enters the y-window (drops the empty left margin once --ymin crops the early ramp-up).")
+    ap.add_argument("--auto_ymax", action="store_true", help="Pick --ymax so that the top ~25%% of the axes is free of data, leaving room for --legend_top.")
+    ap.add_argument("--legend_top", action="store_true", help="Two-column legend in the free band at the top of the axes (never overlaps curves; use with --auto_ymax).")
+    ap.add_argument("--skip_existing", action="store_true", help="Do nothing if the output figure already exists (never overwrite a validated figure).")
     ap.add_argument("--ymin", type=float, default=0.0)
     ap.add_argument("--ymax", type=float, default=1.0)
     ap.add_argument("--legend_loc", type=str, default="lower right")
@@ -110,9 +118,16 @@ def main():
     methods = parse_methods_arg(args.methods) if args.methods else default_methods(args.dataset)
     wf = args.widen_factor if args.widen_factor is not None else (4 if args.dataset == "cifar100" else 2)
 
+    suffix = AXIS_CONFIG[args.xaxis]["suffix"]
+    out_path = args.out or os.path.join(FIGURES_ROOT, f"all_methods_acc_vs_{suffix}_{args.dataset}_{args.num_labeled}_seed{args.seed}.png")
+    if args.skip_existing and os.path.exists(out_path):
+        print("exists, skipped:", out_path)
+        return
+
     fig, ax = plt.subplots(figsize=(3.4, 3.1))
 
     xmax = 0
+    curves = []
     for label, fname in methods:
         path = os.path.join(result_dir, fname)
         if not os.path.exists(path):
@@ -134,7 +149,27 @@ def main():
             xvals = [s * gflops_per_it for s in d["step"]]
 
         xmax = max(xmax, xvals[-1])
+        curves.append((label, xvals, acc))
         ax.plot(xvals, acc, label=display_label(label), linewidth=1.3)
+
+    if args.xmax is None and args.auto_xmax:
+        ends = sorted(x[-1] for _, x, a in curves if max(a) >= args.target_acc - 1e-9)
+        if len(ends) >= 2:
+            median = (ends[(len(ends) - 1) // 2] + ends[len(ends) // 2]) / 2
+            kept = [e for e in ends if e <= 2.5 * median]
+            xmax = 1.04 * max(kept)
+        if args.xaxis == "time":
+            xmax = min(xmax, 120)
+        args.xmax = xmax
+
+    x_hi = args.xmax if args.xmax is not None else xmax
+    if args.auto_xmin:
+        firsts = [next(x for x, a in zip(xs, accs) if a >= args.ymin) for _, xs, accs in curves if max(accs) >= args.ymin]
+        if firsts and min(firsts) > 0.06 * x_hi:
+            args.xmin = 0.9 * min(firsts)
+    if args.auto_ymax:
+        top = max([args.target_acc] + [a for _, xs, accs in curves for x, a in zip(xs, accs) if args.xmin <= x <= x_hi])
+        args.ymax = math.ceil((args.ymin + (top + 0.005 - args.ymin) / 0.74) / 0.005) * 0.005
 
     ax.axhline(args.target_acc, color="black", linestyle="--", linewidth=1.0, alpha=0.7, label=f"target {args.target_acc*100:.0f}%")
 
@@ -142,14 +177,19 @@ def main():
     ax.set_ylabel("Accuracy")
     ax.set_title(f"{dataset_title(args.dataset)}, {args.num_labeled} labels\nseed {args.seed}", fontweight="bold", fontsize=11, pad=4)
     ax.set_ylim(args.ymin, args.ymax)
-    ax.set_xlim(0, args.xmax if args.xmax is not None else xmax)
+    ax.set_xlim(args.xmin, args.xmax if args.xmax is not None else xmax)
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
+    if args.xaxis == "steps":
+        ax.xaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{x / 1000:g}k" if x >= 1000 else f"{x:g}"))
     ax.grid(True, alpha=0.3, linewidth=0.5)
-    ax.legend(loc=args.legend_loc, frameon=True, framealpha=0.85, fontsize=8)
+    if args.legend_top:
+        ax.legend(loc="upper center", ncol=2, frameon=True, framealpha=0.9, fontsize=7, columnspacing=1.0,
+                  handlelength=1.6, borderpad=0.3, labelspacing=0.25)
+    else:
+        ax.legend(loc=args.legend_loc, frameon=True, framealpha=0.85, fontsize=8)
 
     fig.tight_layout(pad=0.5)
 
-    suffix = AXIS_CONFIG[args.xaxis]["suffix"]
-    out_path = args.out or os.path.join(FIGURES_ROOT, f"all_methods_acc_vs_{suffix}_{args.dataset}_{args.num_labeled}_seed{args.seed}.png")
     fig.savefig(out_path, dpi=300)
     print("saved to", out_path)
 

@@ -221,17 +221,20 @@ désormais complète sur les 3 seeds pour les 5 méthodes.**
 | flexmatch | 31 500 | 69.6 min | 68.0 min | 50.45% | 105 679 TFLOPs |
 | efficientmatch_3 | 32 000 | 59.6 min | 58.0 min | 50.40% | 93 502 TFLOPs |
 | fixmatch | 53 000 | 116.0 min | 113.4 min | 47.04% (max) | 177 809 TFLOPs — ❌ jamais atteint 50% |
-| mixmatch | 34 500 | 27.5 min | 25.8 min | 43.71% (max) | 41 070 TFLOPs — ⏸️ **run en pause, interrompue manuellement (pas un plafond), à reprendre** |
+| mixmatch | 137 500 | 108.0 min | 101.1 min | 45.72% (max) | 163 684 TFLOPs — ❌ jamais atteint 50% (tué à 2h) |
 
 **Synthèse** : **efficientmatch_3 est systématiquement le plus rapide et le moins coûteux en
 FLOPs** parmi les méthodes qui convergent (48.1-58.1 min corrigé, 77-93k TFLOPs), devant regmixmatch
 et flexmatch (classement variable selon la seed, 48.1-85.6 min). **fixmatch et mixmatch échouent
 systématiquement à atteindre 50%** sur les 3 seeds, plafonnant respectivement autour de 46-48% et
-43-46% avant d'être arrêtés par le plafond watchdog de 2h — contrairement à CIFAR-100 10000 labels
-(target 60%) où fixmatch converge normalement ; le régime à 2500 labels (25/classe sur 100 classes)
-semble être un point de rupture pour ces deux méthodes sur cette architecture. La run mixmatch seed
-2701 reste incomplète (interrompue en session, pas par le watchdog) — à reprendre avant conclusion
-définitive sur cette seed, la tendance étant déjà cohérente sur 2/3 seeds.
+45-47% avant d'être arrêtés par le plafond watchdog de 2h (sur les 3 seeds pour les deux méthodes) —
+contrairement à CIFAR-100 10000 labels (target 60%) où fixmatch converge normalement ; le régime à
+2500 labels (25/classe sur 100 classes) semble être un point de rupture pour ces deux méthodes sur
+cette architecture.
+
+Note de lecture : les colonnes Steps/Temps des runs tuées à 2h indiquent le point où l'accuracy a
+été **maximale**, pas le dernier point enregistré (les runs ont bien tourné jusqu'à ~119-120 min ;
+l'accuracy de fixmatch et mixmatch oscille en fin de run, leur pic peut donc précéder l'arrêt).
 
 ---
 
@@ -243,7 +246,7 @@ définitive sur cette seed, la tendance étant déjà cohérente sur 2/3 seeds.
 | CIFAR-10, 250 labels | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 (1 jamais convergé) | ✅ 3/3 |
 | CIFAR-10, 4000 labels | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 |
 | CIFAR-100, 10000 labels (WF4) | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 |
-| CIFAR-100, 2500 labels (WF4) | ✅ 3/3 | ✅ 3/3 (**0/3 atteint 50%**) | ✅ 3/3 | ⏸️ 2/3 (0/2 atteint 50%, seed 2701 en pause) | ✅ 3/3 |
+| CIFAR-100, 2500 labels (WF4) | ✅ 3/3 | ✅ 3/3 (**0/3 atteint 50%**) | ✅ 3/3 | ✅ 3/3 (**0/3 atteint 50%**) | ✅ 3/3 |
 
-**Couverture complète sur les 3 seeds pour 4 des 5 configs.** Reste à faire avant publication :
-reprendre et terminer la run mixmatch seed 2701 sur CIFAR-100 2500 labels/WF4.
+**Couverture complète sur les 3 seeds pour les 5 configs et les 5 méthodes.** Aucun trou restant
+dans le périmètre retenu pour l'article.
