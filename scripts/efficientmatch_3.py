@@ -71,6 +71,8 @@ parser.add_argument("--seed", type=int, default=42)
 parser.add_argument("--test_period", type=int, default=500)
 parser.add_argument("--tau", type=float, default=0.95)
 parser.add_argument("--adaptive_threshold", type=str2bool, default=False, help="Use FlexMatch-style class-adaptive confidence thresholding (Curriculum Pseudo Labeling) instead of a fixed tau.")
+parser.add_argument("--freematch_threshold", type=str2bool, default=False, help="Use FreeMatch's self-adaptive thresholding (as in regmixmatch.py) instead of a fixed tau: threshold = time_p * p_model[pseudo]/max(p_model), with time_p / p_model EMA-tracked (momentum 0.999) from the weak-view predictions and initialized uniformly at 1/num_classes (FreeMatch's standard init -- regmixmatch.py instead seeds them with a supervised warmup, not reproduced here to keep the training budget unchanged). Clamped to [0.9, 0.95] on SVHN, like regmixmatch.py. Results are saved as efficientmatch_freematch_*. Mutually exclusive with --adaptive_threshold.")
+parser.add_argument("--freematch_svhn_clamp", type=str2bool, default=True, help="Only used with --freematch_threshold: clamp the adaptive threshold to [0.9, 0.95] on SVHN, as the reference FreeMatch/RegMixMatch code does. Set to false to use the raw adaptive threshold on SVHN too (results are then saved as efficientmatch_freematch_noclamp_*).")
 parser.add_argument("--mu", type=int, default=3, help="Unlabeled:labeled batch size ratio.")
 parser.add_argument("--mixup_weight", type=float, default=1.0, help="Weight applied to the Mixup loss term.")
 parser.add_argument("--thresh_warmup", type=str2bool, default=True, help="Only used when --adaptive_threshold is enabled: include still-unassigned samples in the per-class normalization during warmup.")
@@ -229,8 +231,11 @@ def run_efficientmatch():
             pass
 
     adaptive_threshold = args.adaptive_threshold
+    freematch_threshold = args.freematch_threshold
+    if adaptive_threshold and freematch_threshold:
+        raise ValueError("--adaptive_threshold (FlexMatch) and --freematch_threshold are mutually exclusive.")
     thresh_warmup = args.thresh_warmup
-    method_name = "efficientmatch_3" + ("_flex" if adaptive_threshold else "") + ("_ema" if args.use_ema else "") + (f"_mu{mu}" if mu != 3 else "") + (f"_mixw{args.mixup_weight}" if args.mixup_weight != 1.0 else "") + (f"_wf{args.widen_factor}" if args.widen_factor != 2 else "")
+    method_name = ("efficientmatch_freematch" if freematch_threshold else "efficientmatch_3") + ("_noclamp" if freematch_threshold and not args.freematch_svhn_clamp else "") + ("_flex" if adaptive_threshold else "") + ("_ema" if args.use_ema else "") + (f"_mu{mu}" if mu != 3 else "") + (f"_mixw{args.mixup_weight}" if args.mixup_weight != 1.0 else "") + (f"_wf{args.widen_factor}" if args.widen_factor != 2 else "")
     dataset_prefix = f"{args.dataset}-"
     name_of_experiment = f"{dataset_prefix}labeled-{num_labeled}-seed-{args.seed}"
 
@@ -244,6 +249,10 @@ def run_efficientmatch():
     # --- Seuillage adaptatif débrayable (Curriculum Pseudo-Labeling, FlexMatch) ---
     selected_label = torch.full((len(unlabeled_ds),), -1, dtype=torch.long, device=device)
     classwise_acc = torch.zeros(num_classes, dtype=torch.float32, device=device)
+
+    # --- Seuillage adaptatif débrayable (FreeMatch, tel que dans regmixmatch.py) ---
+    time_p = torch.tensor(1.0 / num_classes, device=device)
+    p_model = torch.full((num_classes,), 1.0 / num_classes, device=device)
 
     metrics = {
         "step": [],
@@ -342,6 +351,14 @@ def run_efficientmatch():
                         wo_negative_one[0] = 0
                         denom = max(wo_negative_one.max().item(), 1)
                         classwise_acc = counts_per_class / denom
+            elif freematch_threshold:
+                time_p = time_p * 0.999 + max_prob.mean() * 0.001
+                p_model = p_model * 0.999 + probs_u_w.mean(dim=0) * 0.001
+                p_model_cutoff = p_model / p_model.max()
+                threshold = time_p * p_model_cutoff[pseudo]
+                if args.dataset == "svhn" and args.freematch_svhn_clamp:
+                    threshold = torch.clamp(threshold, min=0.9, max=0.95)
+                mask = max_prob.ge(threshold).float()
             else:
                 mask = max_prob.ge(tau).float()
 

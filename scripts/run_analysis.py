@@ -45,7 +45,7 @@ GFLOPS_PER_IT = {
     },
     4: {
         "fixmatch": 3354.88, "flexmatch": 3354.88, "mixmatch": 1190.43,
-        "regmixmatch": 7467.01, "efficientmatch_3": 2921.93,
+        "regmixmatch": 7467.01, "efficientmatch_3": 2921.93, "efficientmatch": 2921.93,
     },
     8: {
         "fixmatch": 13332.36, "flexmatch": 13332.36, "mixmatch": 4730.83,
@@ -74,17 +74,58 @@ def parse_widen_factor(name, default_wf):
     return name, default_wf
 
 
-def gflops_for(name, widen_factor):
+def freematch_threshold_flops(n_unlabeled, num_classes, svhn_clamp):
+    """Exact number of scalar operations per iteration that FreeMatch's self-adaptive thresholding
+    (efficientmatch_3.py --freematch_threshold) adds on top of a fixed-tau threshold.
+
+    Convention: one add / mul / div / compare / max = 1 FLOP; indexing, casts and copies = 0.
+    FlopCounterMode (used for every other number in this file) only counts conv/matmul FLOPs, so
+    these element-wise operations are counted here by hand. n_u = unlabeled batch size (mu * 64),
+    C = number of classes:
+      max_prob.mean()                        n_u
+      time_p EMA (2 mul + 1 add)             3
+      probs_u_w.mean(dim=0)                  n_u * C
+      p_model EMA (2 mul + 1 add per class)  3 * C
+      p_model.max()                          C - 1
+      p_model / max                          C
+      time_p * cutoff[pseudo]                n_u
+      SVHN clamp (2 compares)                2 * n_u        (only when the clamp is active)
+    The final `max_prob >= threshold` compare (n_u) is not counted: the fixed-tau baseline does the
+    same compare, so it is not an extra."""
+    ops = n_unlabeled + 3 + n_unlabeled * num_classes + 3 * num_classes + (num_classes - 1) + num_classes + n_unlabeled
+    if svhn_clamp:
+        ops += 2 * n_unlabeled
+    return ops
+
+
+def freematch_extra_flops_per_iter(name, dataset, mu=3, batch_size_l=64):
+    """Extra FLOPs/iteration of the FreeMatch thresholding for a result name, or 0 if `name` is not
+    an efficientmatch_freematch run (or the dataset is unknown)."""
+    if "freematch" not in name or dataset is None:
+        return 0
+    num_classes = 100 if dataset == "cifar100" else 10
+    svhn_clamp = dataset == "svhn" and "noclamp" not in name
+    return freematch_threshold_flops(batch_size_l * mu, num_classes, svhn_clamp)
+
+
+def gflops_for(name, widen_factor, dataset=None):
+    """GFLOPs per iteration for a result name. Pass `dataset` to include the (tiny but non-zero)
+    FreeMatch-thresholding overhead for efficientmatch_freematch runs."""
     table = GFLOPS_PER_IT.get(widen_factor, {})
     n = name.replace("_ema", "")
+    base = None
     if n in table:
-        return table[n]
-    parts = n.split("_")
-    for i in range(len(parts), 0, -1):
-        cand = "_".join(parts[:i])
-        if cand in table:
-            return table[cand]
-    return None
+        base = table[n]
+    else:
+        parts = n.split("_")
+        for i in range(len(parts), 0, -1):
+            cand = "_".join(parts[:i])
+            if cand in table:
+                base = table[cand]
+                break
+    if base is None:
+        return None
+    return base + freematch_extra_flops_per_iter(name, dataset) / 1e9
 
 
 def resolve_dir(args):
@@ -136,12 +177,13 @@ def cmd_compare(args):
     if not runs:
         raise SystemExit(f"No *_metrics.json found in {result_dir}")
 
+    dataset = os.path.basename(os.path.normpath(result_dir)).split("-labeled-")[0]
     rows = []
     for name, (data, wf) in runs.items():
         eval_s = EVAL_SECONDS.get(wf)
         idx, step, acc, time_s = best_point(data)
         n_evals = idx + 1
-        gflops_it = gflops_for(name, wf)
+        gflops_it = gflops_for(name, wf, dataset)
         tflops = gflops_it * step / 1000 if gflops_it else None
         corr = corrected_minutes(time_s, n_evals, eval_s) if eval_s else None
         rows.append((name, wf, acc, step, time_s / 60, corr, tflops, n_evals))

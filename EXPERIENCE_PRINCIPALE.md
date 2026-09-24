@@ -6,7 +6,10 @@ labels, CIFAR-10 250 labels, CIFAR-10 4000 labels, CIFAR-100 10000 labels, CIFAR
 et **3 seeds** (2312, 0308, 2701). Toute variante d'ablation (mu différent, efficientmatch
 v1/flex/2, sequencematch, regmixmatch_mu3, runs interrompus ou hors seeds retenues) est
 **volontairement exclue** de ce document — elle reste documentée dans
-`SEEDS_2312_308_2701_INVENTORY.md` (historique complet) et `EXPERIMENT_LOG.md`.
+`SEEDS_2312_308_2701_INVENTORY.md` (historique complet) et `EXPERIMENT_LOG.md`. **Seule exception :**
+la variante **efficientmatch_freematch** (efficientmatch_3 + seuillage adaptatif de FreeMatch,
+option `--freematch_threshold`), reportée en ligne supplémentaire "(variante)" dans chaque tableau
+et résumée dans la section dédiée ci-dessous ; elle ne fait pas partie des 5 méthodes de référence.
 
 **CIFAR-100 (10000 et 2500 labels) est reporté exclusivement en WRN-28-4 (WF4)**, l'architecture de
 facto sur ces configs (WRN-28-8 sature la VRAM de la carte utilisée, cf. `FLOPS_RESULTS.md`) ; les
@@ -37,6 +40,7 @@ rapportée est le maximum atteint avant coupure (marqué "jamais atteint la cibl
 | regmixmatch | 5 500 | 10.3 min | 10.2 min | 90.51% | 10 405 TFLOPs |
 | mixmatch | 18 500 | 6.8 min | 6.5 min | 90.27% | 5 580 TFLOPs |
 | efficientmatch_3 | 7 000 | 5.8 min | 5.7 min | 90.25% | 5 182 TFLOPs |
+| efficientmatch_freematch (variante) | 6 000 | 4.9 min | 4.8 min | 90.22% | 4 442 TFLOPs |
 | fixmatch | 8 000 | 7.8 min | 7.7 min | 90.01% | 6 801 TFLOPs |
 | flexmatch | 115 500 | 117.9 min | 115.8 min | 83.99% (max) | 98 187 TFLOPs — ❌ jamais atteint 90% (tué à 2h) |
 
@@ -78,6 +82,7 @@ dans une fourchette étroite (5.2-18.4 min).
 | efficientmatch_3 | 42 000 | 30.4 min | 29.6 min | 80.11% | 31 095 TFLOPs |
 | fixmatch | 170 500 | 272.5 min | 269.3 min | 80.06% | 144 942 TFLOPs |
 | fixmatch (bis, même config) | 127 000 | 116.0 min | 113.7 min | 80.05% | 107 963 TFLOPs |
+| efficientmatch_freematch (variante) | 41 500 | 29.7 min | 29.0 min | 80.05% | 30 725 TFLOPs |
 | regmixmatch | 35 000 | 61.2 min | 60.6 min | 80.04% | 66 215 TFLOPs |
 | flexmatch | 65 500 | 64.6 min | 63.3 min | 80.03% | 55 682 TFLOPs |
 | mixmatch | 827 500 | 778.7 min (13h) | 763.4 min | 78.42% (max) | 249 607 TFLOPs — ❌ jamais atteint 80% |
@@ -119,6 +124,7 @@ méthodologique systématique.
 
 | Méthode | Steps | Temps | Temps corrigé | Acc | FLOPs |
 |---|---:|---:|---:|---:|---:|
+| efficientmatch_freematch (variante) | 25 500 | 18.2 min | 17.7 min | 90.09% | 18 879 TFLOPs |
 | efficientmatch_3 | 41 000 | 29.0 min | 28.2 min | 90.06% | 30 354 TFLOPs |
 | regmixmatch | 25 000 | 43.4 min | 42.9 min | 90.05% | 47 296 TFLOPs |
 | fixmatch | 99 000 | 87.1 min | 85.2 min | 90.03% | 84 160 TFLOPs |
@@ -199,6 +205,7 @@ désormais complète sur les 3 seeds pour les 5 méthodes.**
 |---|---:|---:|---:|---:|---:|
 | regmixmatch | 19 200 | 87.5 min | 85.6 min | 51.41% | 143 367 TFLOPs |
 | flexmatch | 31 500 | 70.8 min | 69.2 min | 50.25% | 105 679 TFLOPs |
+| efficientmatch_freematch (variante) | 16 000 | 29.8 min | 29.0 min | 50.18% | 46 751 TFLOPs |
 | efficientmatch_3 | 30 464 | 58.1 min | 55.1 min | 50.11% | 89 014 TFLOPs |
 | fixmatch | 54 000 | 119.2 min | 116.5 min | 46.81% (max) | 181 164 TFLOPs — ❌ jamais atteint 50% |
 | mixmatch | 84 000 | 67.9 min | 63.7 min | 46.35% (max) | 99 996 TFLOPs — ❌ jamais atteint 50% |
@@ -235,6 +242,34 @@ cette architecture.
 Note de lecture : les colonnes Steps/Temps des runs tuées à 2h indiquent le point où l'accuracy a
 été **maximale**, pas le dernier point enregistré (les runs ont bien tourné jusqu'à ~119-120 min ;
 l'accuracy de fixmatch et mixmatch oscille en fin de run, leur pic peut donc précéder l'arrêt).
+
+---
+
+## Variante efficientmatch_freematch (seuillage adaptatif FreeMatch)
+
+efficientmatch_3 dont le seuil de confiance fixe (tau = 0.95) est remplacé par le seuillage
+adaptatif de FreeMatch tel qu'implémenté dans `regmixmatch.py` : `seuil = time_p × p_model[classe] /
+max(p_model)`, avec `time_p` et `p_model` suivis par EMA (0.999) sur les prédictions faibles,
+initialisés à 1/nb_classes (init standard de FreeMatch — `regmixmatch.py` utilise à la place un
+échauffement supervisé de 2048 pas, non reproduit ici pour garder le budget d'entraînement
+inchangé), et borné à [0.9, 0.95] sur SVHN. Le masque adaptatif sert à la fois à la loss de
+cohérence et au filtrage du Mixup. Coût par itération identique à efficientmatch_3 (aucun appel de
+modèle supplémentaire). Même cible et même plafond 2h que les méthodes de référence.
+
+**Seed 2312 (seule seed terminée à ce stade ; seeds 0308 et 2701 en cours)** — écart vs
+efficientmatch_3 :
+
+| Config | Steps | Temps corrigé | TFLOPs | Écart de temps vs efficientmatch_3 |
+|---|---:|---:|---:|---:|
+| SVHN, 250 labels | 6 000 (vs 7 000) | 4.8 min (vs 5.7) | 4 442 (vs 5 182) | **-15%** |
+| CIFAR-10, 250 labels | 41 500 (vs 42 000) | 29.0 min (vs 29.6) | 30 725 (vs 31 095) | -2% |
+| CIFAR-10, 4000 labels | 25 500 (vs 41 000) | 17.7 min (vs 28.2) | 18 879 (vs 30 354) | **-37%** |
+| CIFAR-100, 2500 labels (WF4) | 16 000 (vs 30 464) | 29.0 min (vs 55.1) | 46 751 (vs 89 014) | **-47%** |
+
+Sur cette seed, la variante est la plus rapide et la moins coûteuse en FLOPs de toutes les
+méthodes sur les 4 configs, mais sa marge sur efficientmatch_3 est négligeable sur CIFAR-10 250
+labels (-2%) et forte partout ailleurs (-15% à -47%). Une seule seed : à confirmer sur 0308 et
+2701 avant toute conclusion.
 
 ---
 
