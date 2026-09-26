@@ -86,10 +86,13 @@ def dataset_title(dataset):
 
 
 AXIS_CONFIG = {
-    "time": {"label": "Temps (min)", "suffix": "time"},
+    "time": {"label": "Time (min)", "suffix": "time"},
     "steps": {"label": "Iterations", "suffix": "steps"},
-    "flops": {"label": "GFLOPs (cumulés)", "suffix": "flops"},
+    "flops": {"label": "Cumulated GFLOPs", "suffix": "flops"},
 }
+
+
+BUDGET_MIN = 120  # per-run wall-clock budget: evaluations after 2h are never plotted
 
 
 def main():
@@ -107,6 +110,8 @@ def main():
     ap.add_argument("--auto_xmin", action="store_true", help="Start the x-axis where the first curve enters the y-window (drops the empty left margin once --ymin crops the early ramp-up).")
     ap.add_argument("--auto_ymax", action="store_true", help="Pick --ymax so that the top ~25%% of the axes is free of data, leaving room for --legend_top.")
     ap.add_argument("--legend_top", action="store_true", help="Two-column legend in the free band at the top of the axes (never overlaps curves; use with --auto_ymax).")
+    ap.add_argument("--no_budget", action="store_true", help="Do not truncate curves at the 2h budget (for deliberately unlimited runs).")
+    ap.add_argument("--hide_target", action="store_true", help="Do not draw the target-accuracy line.")
     ap.add_argument("--skip_existing", action="store_true", help="Do nothing if the output figure already exists (never overwrite a validated figure).")
     ap.add_argument("--ymin", type=float, default=0.0)
     ap.add_argument("--ymax", type=float, default=1.0)
@@ -148,6 +153,9 @@ def main():
                 continue
             xvals = [s * gflops_per_it for s in d["step"]]
 
+        keep = [i for i, t in enumerate(d["time_elapsed"]) if args.no_budget or t / 60 <= BUDGET_MIN]
+        xvals, acc = [xvals[i] for i in keep], [acc[i] for i in keep]
+
         xmax = max(xmax, xvals[-1])
         curves.append((label, xvals, acc))
         ax.plot(xvals, acc, label=display_label(label), linewidth=1.3)
@@ -171,7 +179,8 @@ def main():
         top = max([args.target_acc] + [a for _, xs, accs in curves for x, a in zip(xs, accs) if args.xmin <= x <= x_hi])
         args.ymax = math.ceil((args.ymin + (top + 0.005 - args.ymin) / 0.74) / 0.005) * 0.005
 
-    ax.axhline(args.target_acc, color="black", linestyle="--", linewidth=1.0, alpha=0.7, label=f"target {args.target_acc*100:.0f}%")
+    if not args.hide_target:
+      ax.axhline(args.target_acc, color="black", linestyle="--", linewidth=1.0, alpha=0.7, label=f"target {args.target_acc*100:.0f}%")
 
     ax.set_xlabel(AXIS_CONFIG[args.xaxis]["label"])
     ax.set_ylabel("Accuracy")

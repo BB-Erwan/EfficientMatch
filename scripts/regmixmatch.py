@@ -223,6 +223,7 @@ parser.add_argument("--total_steps", type=int, default=2**20, help="Nominal hori
 parser.add_argument("--lr_schedule", type=str, default="fixmatch_cosine", choices=["fixmatch_cosine", "cosine_annealing"], help="LR schedule: rescaled FixMatch cosine (default) or torch's classic CosineAnnealingLR.")
 parser.add_argument("--verbose", type=str2bool, default=False)
 parser.add_argument("--target_acc", type=float, default=None, help="Stop the run early once test_acc reaches this value.")
+parser.add_argument("--tag", type=str, default="", help="Suffix appended to the result file name (e.g. 'unlimited').")
 parser.add_argument("--use_ema", type=str2bool, default=True, help="Evaluate an EMA of the weights instead of the raw training weights.")
 parser.add_argument("--ema_decay", type=float, default=0.999)
 args = parser.parse_args()
@@ -375,7 +376,7 @@ def run_regmixmatch():
     alpha_l = args.alpha_l
     confident_pool_full = (num_labeled / num_classes) >= 100  # rich-label regime: mix confident pool + labeled data
 
-    method_name = "regmixmatch" + ("_noclamp" if not args.svhn_clamp else "") + (f"_mu{args.mu}" if args.mu != 7 else "") + ("_ema" if args.use_ema else "") + (f"_wf{args.widen_factor}" if args.widen_factor != 2 else "")
+    method_name = "regmixmatch" + ("_noclamp" if not args.svhn_clamp else "") + (f"_mu{args.mu}" if args.mu != 7 else "") + ("_ema" if args.use_ema else "") + (f"_wf{args.widen_factor}" if args.widen_factor != 2 else "") + (f"_{args.tag}" if args.tag else "")
     dataset_prefix = f"{args.dataset}-"
     name_of_experiment = f"{dataset_prefix}labeled-{num_labeled}-seed-{args.seed}"
 

@@ -108,22 +108,22 @@ reste systématiquement plus lent et plus coûteux en FLOPs que mu=3.
 | mu | Steps | Temps | Temps corrigé | Acc finale | FLOPs totaux | Statut |
 |---:|---:|---:|---:|---:|---:|---|
 | 1 | 100 500 | 41.5 min | 39.6 min | 90.06% | 35 824 TFLOPs | ✅ |
-| 3 (défaut) | 43 000 | 41.1 min | 40.3 min | 90.03% | 31 835 TFLOPs | ✅ (temps anormalement élevé, probable contention GPU passagère) |
+| 3 (défaut) | 43 500 | 30.6 min | 29.8 min | 90.09% | 32 205 TFLOPs | ✅ (rejouée : la première mesure, 41.1 min, était gonflée par un ralentissement de la machine) |
 | 5 | 30 500 | 32.5 min | 32.0 min | 90.05% | 34 290 TFLOPs | ✅ |
 | 7 | 26 000 | 37.0 min | 36.5 min | 90.05% | 39 212 TFLOPs | ✅ |
 
 ## Discussion — 4000 labels
 
 - **mu=1 converge de façon fiable sur les 3 seeds** à 4000 labels (contrairement à 250 labels), mais
-  reste le plus coûteux en FLOPs à chaque fois (35 468-36 181 TFLOPs) et prend 1.4 à 1.5x plus de
+  reste le plus coûteux en FLOPs à chaque fois (35 468-36 181 TFLOPs) et prend 1.3 à 1.4x plus de
   temps corrigé que mu=3.
 - **mu=3 (valeur par défaut) reste le meilleur compromis FLOPs** sur les 3 seeds : c'est
-  systématiquement la configuration la moins coûteuse en FLOPs totaux (30 354-31 835 TFLOPs), pour
-  une accuracy équivalente aux autres valeurs de mu (90.02-90.06%). Sur la seed 2701, son temps
-  mesuré (41.1 min) est anormalement élevé par rapport aux deux autres seeds (~29-30 min) — un
-  artefact probable de contention GPU ponctuelle plutôt qu'un effet réel de mu, puisque le nombre de
-  FLOPs totaux reste le plus faible de la série sur cette même seed.
-- **mu=5 et mu=7 coûtent systématiquement plus de FLOPs que mu=3** (+8% à +28% selon la seed et la
+  systématiquement la configuration la moins coûteuse en FLOPs totaux (30 354-32 205 TFLOPs), pour
+  une accuracy équivalente aux autres valeurs de mu (90.02-90.06%). Sur la seed 2701, la première
+  mesure du temps (41.1 min) était gonflée par un ralentissement de la machine (temps par step
+  anormal) : la run a été rejouée (43 500 steps, 30.6 min, 32 205 TFLOPs), en ligne avec les deux
+  autres seeds (29-30 min).
+- **mu=5 et mu=7 coûtent systématiquement plus de FLOPs que mu=3** (+6% à +29% selon la seed et la
   valeur de mu) pour une accuracy finale quasi identique (90.02-90.12% toutes valeurs confondues) —
   même conclusion qu'à 250 labels : au-delà de mu=3, le surcoût en FLOPs n'est pas compensé par un
   gain d'accuracy mesurable.

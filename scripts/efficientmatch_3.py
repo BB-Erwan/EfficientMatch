@@ -72,6 +72,7 @@ parser.add_argument("--test_period", type=int, default=500)
 parser.add_argument("--tau", type=float, default=0.95)
 parser.add_argument("--adaptive_threshold", type=str2bool, default=False, help="Use FlexMatch-style class-adaptive confidence thresholding (Curriculum Pseudo Labeling) instead of a fixed tau.")
 parser.add_argument("--freematch_threshold", type=str2bool, default=False, help="Use FreeMatch's self-adaptive thresholding (as in regmixmatch.py) instead of a fixed tau: threshold = time_p * p_model[pseudo]/max(p_model), with time_p / p_model EMA-tracked (momentum 0.999) from the weak-view predictions and initialized uniformly at 1/num_classes (FreeMatch's standard init -- regmixmatch.py instead seeds them with a supervised warmup, not reproduced here to keep the training budget unchanged). Clamped to [0.9, 0.95] on SVHN, like regmixmatch.py. Results are saved as efficientmatch_freematch_*. Mutually exclusive with --adaptive_threshold.")
+parser.add_argument("--tag", type=str, default="", help="Optional suffix appended to the result file name (e.g. 'unlimited'), to keep special runs from being confused with the standard ones.")
 parser.add_argument("--freematch_svhn_clamp", type=str2bool, default=True, help="Only used with --freematch_threshold: clamp the adaptive threshold to [0.9, 0.95] on SVHN, as the reference FreeMatch/RegMixMatch code does. Set to false to use the raw adaptive threshold on SVHN too (results are then saved as efficientmatch_freematch_noclamp_*).")
 parser.add_argument("--mu", type=int, default=3, help="Unlabeled:labeled batch size ratio.")
 parser.add_argument("--mixup_weight", type=float, default=1.0, help="Weight applied to the Mixup loss term.")
@@ -235,7 +236,7 @@ def run_efficientmatch():
     if adaptive_threshold and freematch_threshold:
         raise ValueError("--adaptive_threshold (FlexMatch) and --freematch_threshold are mutually exclusive.")
     thresh_warmup = args.thresh_warmup
-    method_name = ("efficientmatch_freematch" if freematch_threshold else "efficientmatch_3") + ("_noclamp" if freematch_threshold and not args.freematch_svhn_clamp else "") + ("_flex" if adaptive_threshold else "") + ("_ema" if args.use_ema else "") + (f"_mu{mu}" if mu != 3 else "") + (f"_mixw{args.mixup_weight}" if args.mixup_weight != 1.0 else "") + (f"_wf{args.widen_factor}" if args.widen_factor != 2 else "")
+    method_name = ("efficientmatch_freematch" if freematch_threshold else "efficientmatch_3") + ("_noclamp" if freematch_threshold and not args.freematch_svhn_clamp else "") + ("_flex" if adaptive_threshold else "") + ("_ema" if args.use_ema else "") + (f"_mu{mu}" if mu != 3 else "") + (f"_mixw{args.mixup_weight}" if args.mixup_weight != 1.0 else "") + (f"_wf{args.widen_factor}" if args.widen_factor != 2 else "") + (f"_{args.tag}" if args.tag else "")
     dataset_prefix = f"{args.dataset}-"
     name_of_experiment = f"{dataset_prefix}labeled-{num_labeled}-seed-{args.seed}"
 

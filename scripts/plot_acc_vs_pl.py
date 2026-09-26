@@ -10,6 +10,7 @@ p.add_argument("--dataset", default="cifar10"); p.add_argument("--num_labeled", 
 p.add_argument("--seed", type=int, default=2701)
 p.add_argument("--methods", nargs="+", default=["efficientmatch_3"])
 p.add_argument("--ymin", type=float, default=50); p.add_argument("--ymax", type=float, default=84)
+p.add_argument("--overwrite", action="store_true")
 a = p.parse_args()
 
 plt.rcParams.update({"font.family": "serif", "font.size": 11, "axes.titlesize": 12, "axes.labelsize": 12,
@@ -17,7 +18,9 @@ plt.rcParams.update({"font.family": "serif", "font.size": 11, "axes.titlesize": 
 d = os.path.join(ROOT, "results", f"{a.dataset}-labeled-{a.num_labeled}-seed-{a.seed}")
 for m in a.methods:
     j = json.load(open(os.path.join(d, f"{m}_ema_metrics.json")))
-    t = [x / 60 for x in j["time_elapsed"]]
+    keep = [i for i, x in enumerate(j["time_elapsed"]) if x / 60 <= 120]  # 2h budget
+    t = [j["time_elapsed"][i] / 60 for i in keep]
+    j = {k: [j[k][i] for i in keep] for k in ("test_acc", "pl_quality")}
     fig, ax = plt.subplots(figsize=(3.4, 3.1))
     ax.plot(t, [100 * v for v in j["test_acc"]], label="Model accuracy", lw=1.5)
     ax.plot(t, [100 * v for v in j["pl_quality"]], label="Pseudo-label quality", lw=1.5)
@@ -29,6 +32,6 @@ for m in a.methods:
     ax.legend(loc="lower right", fontsize=8, frameon=True, framealpha=0.85)
     fig.tight_layout(pad=0.4)
     out = os.path.join(ROOT, "figures", f"{name}_acc_vs_pl_{a.dataset}_{a.num_labeled}_seed{a.seed}.png")
-    if os.path.exists(out):
+    if os.path.exists(out) and not a.overwrite:
         print("skip (exists)", out); continue
     fig.savefig(out, dpi=300); print("saved", out)

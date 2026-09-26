@@ -101,7 +101,7 @@ exposé et tourne à son ratio par défaut).
 | Méthode | Steps | Temps | Temps corrigé | Acc finale | FLOPs totaux |
 |---|---:|---:|---:|---:|---:|
 | efficientmatch_2 (hard) | 36 000 | 25.4 min | 24.8 min | 90.00% | 26 653 TFLOPs |
-| efficientmatch_3 (semi-soft) | 43 000 | 41.1 min | 40.3 min | 90.03% | 31 835 TFLOPs |
+| efficientmatch_3 (semi-soft) | 43 500 | 30.6 min | 29.8 min | 90.09% | 32 205 TFLOPs |
 | efficientmatch_soft | 51 500 | 36.7 min | 35.7 min | 90.05% | 38 128 TFLOPs |
 
 ## Discussion — CIFAR-10, 4000 labels

@@ -23,6 +23,8 @@ def measure(ds, n, seed, m, thr, wf, suf):
     if hit is None:
         return None
     i, step, _, t = hit
+    if t / 60 > 120:
+        return None
     return corrected_minutes(t, i + 1, EVAL_SECONDS[wf]), gflops_for(m + "_ema", wf, ds) * step / 1000
 
 
