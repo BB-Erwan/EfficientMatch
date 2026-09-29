@@ -84,6 +84,7 @@ parser.add_argument("--total_steps", type=int, default=2**20, help="Nominal hori
 parser.add_argument("--lr_schedule", type=str, default="fixmatch_cosine", choices=["fixmatch_cosine", "cosine_annealing"], help="LR schedule: rescaled FixMatch cosine (default) or torch's classic CosineAnnealingLR.")
 parser.add_argument("--verbose", type=str2bool, default=False)
 parser.add_argument("--target_acc", type=float, default=None, help="Stop the run early once test_acc reaches this value.")
+parser.add_argument("--max_minutes", type=float, default=None, help="Stop the run once it has been training for this many minutes, checked at each evaluation. The paper's protocol caps every run at 120 minutes (see run_experiment.py).")
 parser.add_argument("--use_ema", type=str2bool, default=True, help="Evaluate an EMA of the weights instead of the raw training weights.")
 parser.add_argument("--ema_decay", type=float, default=0.999)
 args = parser.parse_args()
@@ -472,6 +473,10 @@ def run_efficientmatch():
 
             if target_acc is not None and acc >= target_acc:
                 logger.info(f"Reached target_acc={target_acc:.4f} at step {step + 1} (acc={acc:.4f}) — stopping early.")
+                break
+
+            if args.max_minutes is not None and metrics["time_elapsed"][-1] >= args.max_minutes * 60:
+                logger.info(f"Reached the {args.max_minutes:.0f}-minute budget at step {step + 1} (acc={acc:.4f}) -- stopping.")
                 break
         elif verbose:
             print(
