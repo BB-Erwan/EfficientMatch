@@ -11,7 +11,7 @@ rencontrés, et travail en attente. À lire avant de relancer quoi que ce soit s
 ## 1. Contexte du projet
 
 Repo de recherche en semi-supervised learning (`EfficientMatch`). Méthodes comparées : fixmatch,
-flexmatch, mixmatch, sequencematch, efficientmatch / efficientmatch_2 / efficientmatch_3
+flexmatch, mixmatch, sequencematch, efficientmatch / efficientmatch_hard / efficientmatch
 (variantes maison), regmixmatch (porté depuis `hhrd9/regmixmatch`). Architecture : WideResNet-28-x
 (x = widen_factor), backbone `build_model()` dans `models.py`.
 
@@ -33,8 +33,8 @@ Python à la volée pour lire un fichier de métriques.
 
 ```
 python scripts/run_analysis.py compare --dataset cifar10 --num_labeled 250 --seed 2312
-python scripts/run_analysis.py at-acc --dataset cifar100 --num_labeled 10000 --seed 2312 --like efficientmatch_3_ema_wf4
-python scripts/run_analysis.py status --dataset cifar10 --num_labeled 250 --seed 2312 --method efficientmatch_3_ema --tail 8
+python scripts/run_analysis.py at-acc --dataset cifar100 --num_labeled 10000 --seed 2312 --like efficientmatch_ema_wf4
+python scripts/run_analysis.py status --dataset cifar10 --num_labeled 250 --seed 2312 --method efficientmatch_ema --tail 8
 ```
 
 - `compare` : tableau complet trié par accuracy, avec temps brut/corrigé (overhead d'éval retiré) et FLOPs totaux.
@@ -100,7 +100,7 @@ dit "GPU clean". Mémoire dédiée : `taskstop-orphaned-processes.md`.
 (au lieu de ~0.6s/step attendu) — VRAM à 96% (7838/8151 MiB), GPU à 100% d'utilisation mais
 seulement 37W de conso (signature de memory-thrashing, pas de calcul réel). **WideResNet-28-4 est
 devenu l'architecture de facto pour CIFAR-100** sur cette machine : fixmatch, flexmatch, mixmatch,
-regmixmatch et efficientmatch_3 ont tous été retestés en `--widen_factor 4` avec succès (facteur de
+regmixmatch et efficientmatch ont tous été retestés en `--widen_factor 4` avec succès (facteur de
 gain de temps ~2.5x à ~6x selon la méthode par rapport à WF8, à accuracy équivalente — voir
 `FLOPS_RESULTS.md`). Détail incident dans `RUNS_TO_REVISIT.md`.
 
@@ -147,7 +147,7 @@ vérifier `ls` du dossier de résultats avant un lancement inhabituel.
 
 ---
 
-## 6. Inventaire de couverture efficientmatch_3 (dernier état vérifié)
+## 6. Inventaire de couverture efficientmatch (dernier état vérifié)
 
 | Config | Seed 2312 | Seed 308 | Seed 2701 |
 |---|---|---|---|
@@ -170,8 +170,8 @@ vérifier `ls` du dossier de résultats avant un lancement inhabituel.
 
 ## 8. Travail en attente, par priorité
 
-L'utilisateur a explicitement mis en pause le plan de "combler tous les trous efficientmatch_3"
-(§6) pour d'abord tester efficientmatch_3 sur CIFAR-100 10000/seed 2312 (fait, voir §6-7) — **ce
+L'utilisateur a explicitement mis en pause le plan de "combler tous les trous efficientmatch"
+(§6) pour d'abord tester efficientmatch sur CIFAR-100 10000/seed 2312 (fait, voir §6-7) — **ce
 plan n'a pas été formellement relancé après ça**. Ne pas reprendre automatiquement sans confirmer
 avec l'utilisateur quelle priorité il souhaite.
 
@@ -184,7 +184,7 @@ WF4, seed-first) :
 (mixmatch déjà réussi sur 308 et 2701 en WF8, non relancé par choix — "ne pas refaire ce qui a déjà
 un résultat")
 
-**Ensuite, si confirmé par l'utilisateur** — combler les trous efficientmatch_3 (§6) :
+**Ensuite, si confirmé par l'utilisateur** — combler les trous efficientmatch (§6) :
 - CIFAR-10 4000 labels, 3 seeds (mu=3 par défaut, potentiellement mu=5 aussi vu les bons résultats
   ailleurs)
 - CIFAR-100 10000 labels, seeds 308 et 2701 (WF4)
@@ -193,7 +193,7 @@ un résultat")
 **Maintenance documentaire en attente** :
 - Rafraîchir `SEEDS_2312_308_2701_INVENTORY.md` avec tous les résultats WF4 (actuellement obsolète
   sur la partie CIFAR-100, voir §5).
-- Une fois les trous efficientmatch_3 comblés, mettre à jour ce même document avec la couverture
+- Une fois les trous efficientmatch comblés, mettre à jour ce même document avec la couverture
   complète.
 
 ---

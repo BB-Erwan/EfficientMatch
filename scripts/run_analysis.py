@@ -22,11 +22,11 @@ Usage:
 
     # "At equivalent accuracy": for every other method in the config, find the step/time at which
     # it first reached the same accuracy as --like's current (or best) accuracy.
-    python run_analysis.py at-acc --dataset cifar100 --num_labeled 10000 --seed 2312 --like efficientmatch_3_ema_wf4
+    python run_analysis.py at-acc --dataset cifar100 --num_labeled 10000 --seed 2312 --like efficientmatch_ema_wf4
     python run_analysis.py at-acc --dataset cifar10 --num_labeled 250 --seed 2312 --target 0.75
 
     # Just the current status of one method's run (step/acc/time, raw and corrected).
-    python run_analysis.py status --dataset cifar10 --num_labeled 250 --seed 2312 --method efficientmatch_3
+    python run_analysis.py status --dataset cifar10 --num_labeled 250 --seed 2312 --method efficientmatch
 """
 import argparse
 import glob
@@ -38,14 +38,14 @@ import re
 GFLOPS_PER_IT = {
     2: {
         "fixmatch": 850.10, "flexmatch": 850.10, "mixmatch": 301.64,
-        "efficientmatch": 740.35, "efficientmatch_2": 740.35, "efficientmatch_3": 740.35,
-        "efficientmatch_3_mu1": 356.46, "efficientmatch_3_mu5": 1124.25, "efficientmatch_3_mu7": 1508.14,
-        "efficientmatch_flex": 740.35, "efficientmatch_flex_mu2": 548.40, "efficientmatch_2_flex": 740.35,
-        "sequencematch": 1809.61, "regmixmatch": 1891.86, "regmixmatch_mu3": 904.80,
+        "efficientmatch": 740.35, "efficientmatch_hard": 740.35, "efficientmatch_soft": 740.35,
+        "efficientmatch_mu1": 356.46, "efficientmatch_mu5": 1124.25, "efficientmatch_mu7": 1508.14,
+        "efficientmatch_flex": 740.35, "efficientmatch_flex_mu2": 548.40, "efficientmatch_hard_flex": 740.35,
+        "regmixmatch": 1891.86, "regmixmatch_mu3": 904.80,
     },
     4: {
         "fixmatch": 3354.88, "flexmatch": 3354.88, "mixmatch": 1190.43,
-        "regmixmatch": 7467.01, "efficientmatch_3": 2921.93, "efficientmatch": 2921.93,
+        "regmixmatch": 7467.01, "efficientmatch": 2921.93,
     },
     8: {
         "fixmatch": 13332.36, "flexmatch": 13332.36, "mixmatch": 4730.83,
@@ -76,7 +76,7 @@ def parse_widen_factor(name, default_wf):
 
 def freematch_threshold_flops(n_unlabeled, num_classes, svhn_clamp):
     """Exact number of scalar operations per iteration that FreeMatch's self-adaptive thresholding
-    (efficientmatch_3.py --freematch_threshold) adds on top of a fixed-tau threshold.
+    (efficientmatch.py --freematch_threshold) adds on top of a fixed-tau threshold.
 
     Convention: one add / mul / div / compare / max = 1 FLOP; indexing, casts and copies = 0.
     FlopCounterMode (used for every other number in this file) only counts conv/matmul FLOPs, so
@@ -280,7 +280,7 @@ def main():
     p_compare.set_defaults(func=cmd_compare)
 
     p_status = sub.add_parser("status", help="Current status of one method's run", parents=[common])
-    p_status.add_argument("--method", type=str, required=True, help="e.g. efficientmatch_3_ema, efficientmatch_3_ema_wf4")
+    p_status.add_argument("--method", type=str, required=True, help="e.g. efficientmatch_ema, efficientmatch_ema_wf4")
     p_status.add_argument("--tail", type=int, default=0, help="Also print the last N evaluations (step/acc/time), useful to see if a no-target_acc run has plateaued")
     p_status.set_defaults(func=cmd_status)
 

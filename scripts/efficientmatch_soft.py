@@ -361,9 +361,9 @@ def run_efficientmatch():
 
             # efficientmatch_soft: the Mixup targets for unlabeled samples use the full
             # softmax distribution (probs_u_w) instead of the hard argmax pseudo-label
-            # (F.one_hot(pseudo, ...)) used by efficientmatch_3/efficientmatch_2. This is
-            # the "soft" pseudo-label variant of the Mixup channel -- efficientmatch_2 is
-            # "hard" (one-hot argmax), efficientmatch_3 is "semi-soft" (Mixup-blended
+            # (F.one_hot(pseudo, ...)) used by efficientmatch/efficientmatch_hard. This is
+            # the "soft" pseudo-label variant of the Mixup channel -- efficientmatch_hard is
+            # "hard" (one-hot argmax), efficientmatch is "semi-soft" (Mixup-blended
             # one-hot), this one is "soft" (Mixup-blended full distribution).
             all_inputs = torch.cat([x_l, x_u_w], dim=0)
             all_targets = torch.cat(

@@ -7,19 +7,19 @@ Objectif : voir jusqu'où monte chaque méthode quand on ne l'arrête pas à une
 ## Protocole
 
 - **Configuration** : CIFAR-10, 250 labels, WRN-28-2, **seed 42 uniquement** (une seule seed).
-- **Méthodes** : `efficientmatch_3` (mu=3, EMA) et `regmixmatch` (mu=7 par défaut, EMA).
+- **Méthodes** : `efficientmatch` (mu=3, EMA) et `regmixmatch` (mu=7 par défaut, EMA).
 - **Sans `--target_acc`** : horizon par défaut de 2^20 = 1 048 576 steps, pas de watchdog de 2h, évaluation tous
   les 500 steps. Les résultats sont écrits sous des noms particuliers (option `--tag unlimited`) :
-  `results/cifar10-labeled-250-seed-42/efficientmatch_3_ema_unlimited_metrics.json` et
+  `results/cifar10-labeled-250-seed-42/efficientmatch_ema_unlimited_metrics.json` et
   `results/cifar10-labeled-250-seed-42/regmixmatch_ema_unlimited_metrics.json`.
 - **Temps corrigé** = temps brut − (nombre d'évaluations × 0.5537 s), coût d'une évaluation en WRN-28-2
-  (cf. `FLOPS_RESULTS.md`). **FLOPs** = steps × FLOPs/itération : 740.35 GFLOPs (efficientmatch_3, mu=3) et
+  (cf. `FLOPS_RESULTS.md`). **FLOPs** = steps × FLOPs/itération : 740.35 GFLOPs (efficientmatch, mu=3) et
   1 891.86 GFLOPs (regmixmatch, mu=7).
 - Les "paliers" sont les **premiers franchissements** d'une accuracy par l'accuracy de test évaluée (EMA).
 
 ## Statut des deux runs
 
-| | efficientmatch_3 | regmixmatch |
+| | efficientmatch | regmixmatch |
 |---|---|---|
 | Steps réalisés | 1 048 576 (horizon complet) | **418 500 (arrêtée à la main, 40% de l'horizon)** |
 | Temps de run | 749.4 min (12.5 h) | 750.6 min (12.5 h) |
@@ -108,7 +108,7 @@ plus loin ; l'inverse vaut pour la fin de run de chaque méthode.
 
 ## Conclusions
 
-1. **efficientmatch_3 plafonne autour de 91-92% sur CIFAR-10 250 labels** (meilleur point 91.62%, moyenne des
+1. **efficientmatch plafonne autour de 91-92% sur CIFAR-10 250 labels** (meilleur point 91.62%, moyenne des
    10 dernières évaluations 91.25%), avec une montée très lente après 90% (60 min de temps corrigé
    supplémentaires par demi-point). Les 80% habituels de l'expérience principale sont atteints en 21 min.
 2. **À accuracy égale, efficientmatch est environ 2 fois plus rapide et plus économe en FLOPs que regmixmatch**
@@ -131,6 +131,6 @@ ligne de cible), y ∈ [0.70, 0.93] :
 
 ```bash
 cd scripts
-python efficientmatch_3.py --dataset cifar10 --num_labeled 250 --seed 42 --tag unlimited
+python efficientmatch.py --dataset cifar10 --num_labeled 250 --seed 42 --tag unlimited
 python regmixmatch.py --dataset cifar10 --num_labeled 250 --seed 42 --tag unlimited
 ```

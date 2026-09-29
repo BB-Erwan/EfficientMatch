@@ -236,7 +236,7 @@ def run_efficientmatch():
     if adaptive_threshold and freematch_threshold:
         raise ValueError("--adaptive_threshold (FlexMatch) and --freematch_threshold are mutually exclusive.")
     thresh_warmup = args.thresh_warmup
-    method_name = ("efficientmatch_freematch" if freematch_threshold else "efficientmatch_3") + ("_noclamp" if freematch_threshold and not args.freematch_svhn_clamp else "") + ("_flex" if adaptive_threshold else "") + ("_ema" if args.use_ema else "") + (f"_mu{mu}" if mu != 3 else "") + (f"_mixw{args.mixup_weight}" if args.mixup_weight != 1.0 else "") + (f"_wf{args.widen_factor}" if args.widen_factor != 2 else "") + (f"_{args.tag}" if args.tag else "")
+    method_name = ("efficientmatch_freematch" if freematch_threshold else "efficientmatch") + ("_noclamp" if freematch_threshold and not args.freematch_svhn_clamp else "") + ("_flex" if adaptive_threshold else "") + ("_ema" if args.use_ema else "") + (f"_mu{mu}" if mu != 3 else "") + (f"_mixw{args.mixup_weight}" if args.mixup_weight != 1.0 else "") + (f"_wf{args.widen_factor}" if args.widen_factor != 2 else "") + (f"_{args.tag}" if args.tag else "")
     dataset_prefix = f"{args.dataset}-"
     name_of_experiment = f"{dataset_prefix}labeled-{num_labeled}-seed-{args.seed}"
 

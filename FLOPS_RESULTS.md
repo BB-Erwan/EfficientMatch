@@ -7,7 +7,7 @@ les scripts de ce dépôt ; CIFAR-100 utilisait WideResNet-28-8 (`--widen_factor
 **WRN-28-8 sature la VRAM de ce GPU (8GB) avec certaines méthodes** (voir `RUNS_TO_REVISIT.md`,
 incident regmixmatch/CIFAR-100) -- WideResNet-28-4 (`--widen_factor 4`) est donc devenu l'architecture
 de facto pour la plupart des runs CIFAR-100 de cette session (fixmatch, flexmatch, mixmatch,
-regmixmatch, efficientmatch_3 ont tous été retestés en WF4). Les FLOPs/itération sont spécifiques à
+regmixmatch, efficientmatch ont tous été retestés en WF4). Les FLOPs/itération sont spécifiques à
 l'architecture -- ne jamais réutiliser une valeur d'une architecture pour une autre. Les fichiers de
 résultats distinguent l'architecture par un suffixe `_wf{N}` dans leur nom (ex.
 `fixmatch_ema_wf4_metrics.json`) ; un fichier sans suffixe sur CIFAR-100 est un run historique en
@@ -18,13 +18,13 @@ WRN-28-8 (avant l'ajout de cette convention de nommage).
 | Méthode | mu | Batch non labellisé | FLOPs / itération | GFLOPs / itération |
 |---|---:|---:|---:|---:|
 | efficientmatch | 3 | 192 | 7.404e+11 | 740.35 |
-| efficientmatch_2 | 3 | 192 | 7.404e+11 | 740.35 |
-| efficientmatch_3 | 3 | 192 | 7.404e+11 | 740.35 |
+| efficientmatch_hard | 3 | 192 | 7.404e+11 | 740.35 |
+| efficientmatch | 3 | 192 | 7.404e+11 | 740.35 |
 | efficientmatch_freematch (CIFAR-10) | 3 | 192 | 7.404e+11 | 740.35 |
 | efficientmatch_freematch (SVHN, borne active) | 3 | 192 | 7.404e+11 | 740.35 |
-| efficientmatch_3_mu1 | 1 | 64 | 3.565e+11 | 356.46 |
-| efficientmatch_3_mu5 | 5 | 320 | 1.124e+12 | 1124.25 |
-| efficientmatch_3_mu7 | 7 | 448 | 1.508e+12 | 1508.14 |
+| efficientmatch_mu1 | 1 | 64 | 3.565e+11 | 356.46 |
+| efficientmatch_mu5 | 5 | 320 | 1.124e+12 | 1124.25 |
+| efficientmatch_mu7 | 7 | 448 | 1.508e+12 | 1508.14 |
 | efficientmatch_flex_mu2 | 2 | 128 | 5.484e+11 | 548.40 |
 | fixmatch | 7 | 448 | 8.501e+11 | 850.10 |
 | flexmatch | 7 | 448 | 8.501e+11 | 850.10 |
@@ -34,21 +34,21 @@ WRN-28-8 (avant l'ajout de cette convention de nommage).
 | sequencematch | 7 | 448 | 1.810e+12 | 1809.61 |
 
 **efficientmatch_freematch (seuillage adaptatif FreeMatch) — valeurs exactes.** Coût du modèle
-(`FlopCounterMode`, conv/matmul uniquement) identique à efficientmatch_3, plus les opérations
+(`FlopCounterMode`, conv/matmul uniquement) identique à efficientmatch, plus les opérations
 élémentaires du seuillage (moyenne, deux EMA, max, produit, comparaisons ; 1 FLOP par opération,
 indexation et copies = 0), comptées à la main dans `run_analysis.freematch_threshold_flops` :
 
-| Config | FLOPs / itération exacts | Surcoût vs efficientmatch_3 (740 351 508 480) |
+| Config | FLOPs / itération exacts | Surcoût vs efficientmatch (740 351 508 480) |
 |---|---:|---:|
 | CIFAR-10 (10 classes) | 740 351 510 836 | +2 356 (3.2e-9 relatif) |
 | SVHN (10 classes, borne [0.9, 0.95] active) | 740 351 511 220 | +2 740 (3.7e-9 relatif) |
 
 Le surcoût est invisible dans les tableaux arrondis ci-dessus. Mesuré via
-`python flops_analysis.py --methods efficientmatch_3 efficientmatch_freematch efficientmatch_freematch_svhn --widen-factor 2`.
+`python flops_analysis.py --methods efficientmatch efficientmatch_freematch efficientmatch_freematch_svhn --widen-factor 2`.
 
 ## Résultats — WideResNet-28-4 (CIFAR-100, architecture de facto sur ce GPU)
 
-Mesuré via `python flops_analysis.py --methods fixmatch flexmatch mixmatch regmixmatch efficientmatch_3 --widen-factor 4`.
+Mesuré via `python flops_analysis.py --methods fixmatch flexmatch mixmatch regmixmatch efficientmatch --widen-factor 4`.
 
 | Méthode | mu | Batch non labellisé | FLOPs / itération | GFLOPs / itération |
 |---|---:|---:|---:|---:|
@@ -56,12 +56,12 @@ Mesuré via `python flops_analysis.py --methods fixmatch flexmatch mixmatch regm
 | flexmatch | 7 | 448 | 3.355e+12 | 3354.88 |
 | mixmatch | 1 | 64 | 1.190e+12 | 1190.43 |
 | regmixmatch | 7 | 448 | 7.467e+12 | 7467.01 |
-| efficientmatch_3 | 3 | 192 | 2.922e+12 | 2921.93 |
+| efficientmatch | 3 | 192 | 2.922e+12 | 2921.93 |
 | efficientmatch_freematch (CIFAR-100) | 3 | 192 | 2.922e+12 | 2921.93 |
 
 Valeurs exactes pour efficientmatch_freematch en CIFAR-100 (100 classes) : 2 921 930 903 158 FLOPs/it,
-soit +20 086 FLOPs/it (6.9e-9 relatif) par rapport à efficientmatch_3 (2 921 930 883 072). Mesuré via
-`python flops_analysis.py --methods efficientmatch_3 efficientmatch_freematch_c100 --widen-factor 4`.
+soit +20 086 FLOPs/it (6.9e-9 relatif) par rapport à efficientmatch (2 921 930 883 072). Mesuré via
+`python flops_analysis.py --methods efficientmatch efficientmatch_freematch_c100 --widen-factor 4`.
 
 ## Résultats — WideResNet-28-8 (CIFAR-100, runs historiques uniquement -- voir avertissement VRAM ci-dessus)
 

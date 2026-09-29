@@ -5,7 +5,7 @@ from run_analysis import EVAL_SECONDS, first_reaching, corrected_minutes, gflops
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SEEDS = (2312, 308, 2701)
-METHODS = ["efficientmatch_3", "fixmatch", "flexmatch", "mixmatch", "regmixmatch"]
+METHODS = ["efficientmatch", "fixmatch", "flexmatch", "mixmatch", "regmixmatch"]
 CONFIGS = [  # (label, dataset, n_labeled, target, widen_factor, file suffix)
     ("SVHN, 250 labels", "svhn", 250, 0.90, 2, ""),
     ("CIFAR-10, 250 labels", "cifar10", 250, 0.80, 2, ""),
@@ -59,7 +59,7 @@ w = out.append
 w("# Meilleure méthode par seuil d'accuracy réduit (-5% / -10%)\n")
 w("Ce document (généré par `scripts/best_method_by_threshold.py`) identifie, pour chacune des 4 configurations "
   "retenues de `EXPERIENCE_PRINCIPALE.md` (CIFAR-100 10000 labels exclu), quelle méthode parmi les 5 méthodes "
-  "principales (efficientmatch_3, fixmatch, flexmatch, mixmatch, regmixmatch) atteint le plus vite (temps corrigé "
+  "principales (efficientmatch, fixmatch, flexmatch, mixmatch, regmixmatch) atteint le plus vite (temps corrigé "
   "du coût des évaluations) et au moindre coût (FLOPs cumulés) un seuil d'accuracy réduit de 5 ou 10 points par "
   "rapport au target_acc habituel de la configuration. La variante efficientmatch_freematch n'est pas incluse.\n")
 w("Seuils (target original → -5% → -10%) :\n")

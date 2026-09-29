@@ -6,14 +6,13 @@ three x-axes for one or more methods on a given config, styled for a single-colu
 figure (small figsize, large fonts, serif, 300dpi -- see memory/publication-figure-style.md
 conventions).
 
-By default, the 5 core methods (efficientmatch_3, fixmatch, flexmatch, mixmatch, regmixmatch)
+By default, the 5 core methods (efficientmatch, fixmatch, flexmatch, mixmatch, regmixmatch)
 are plotted using their standard "<method>_ema_metrics.json" (or "..._ema_wf4_metrics.json" for
 cifar100) file. Use --methods to override with an explicit "label:filename" list when a config
 has ambiguous files (e.g. fixmatch_ema vs fixmatch_ema_orig vs fixmatch_ema_bis).
 
-"efficientmatch_3" is always displayed as "efficientmatch" in the legend (the "_3" is an internal
-variant label, not something readers of the figure need) -- this applies whether the method comes
-from the default list or from --methods.
+Legend labels are the method labels themselves, whether they come from the default list or from
+--methods. DISPLAY_LABEL_OVERRIDES renames one in the legend without touching the file name.
 
 Usage:
     python plot_acc_vs_time.py --dataset cifar10 --num_labeled 250 --seed 2312 --target_acc 0.80
@@ -24,9 +23,9 @@ Usage:
     python plot_acc_vs_time.py --dataset cifar10 --num_labeled 250 --seed 2312 --target_acc 0.80 \
         --xmax 120 --ymin 0 --ymax 1.0 --legend_loc "lower right"
     python plot_acc_vs_time.py --dataset cifar100 --num_labeled 10000 --seed 2312 --target_acc 0.60 \
-        --methods "efficientmatch_3:efficientmatch_3_ema_wf4_metrics.json,fixmatch:fixmatch_ema_wf4_metrics.json"
+        --methods "efficientmatch:efficientmatch_ema_wf4_metrics.json,fixmatch:fixmatch_ema_wf4_metrics.json"
     python plot_acc_vs_time.py --dataset cifar10 --num_labeled 250 --seed 2312 --target_acc 0.80 \
-        --methods "efficientmatch_3:efficientmatch_3_ema_metrics.json,fixmatch:fixmatch_ema_bis_metrics.json"
+        --methods "efficientmatch:efficientmatch_ema_metrics.json,fixmatch:fixmatch_ema_bis_metrics.json"
 
 Output is saved directly into the repo's figures/ directory (default naming:
 all_methods_acc_vs_<xaxis>_<dataset>_<num_labeled>_seed<seed>.png), matching the standing
@@ -48,10 +47,10 @@ FIGURES_ROOT = os.path.join(REPO_ROOT, "figures")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from run_analysis import gflops_for  # noqa: E402
 
-DEFAULT_METHOD_ORDER = ["efficientmatch_3", "fixmatch", "flexmatch", "mixmatch", "regmixmatch"]
+DEFAULT_METHOD_ORDER = ["efficientmatch", "fixmatch", "flexmatch", "mixmatch", "regmixmatch"]
 
 # Cosmetic-only renames applied to whatever label is used (default or --methods-supplied).
-DISPLAY_LABEL_OVERRIDES = {"efficientmatch_3": "efficientmatch"}
+DISPLAY_LABEL_OVERRIDES = {}  # result-file name -> legend label, when they differ
 
 plt.rcParams.update({
     "font.size": 11,

@@ -1,13 +1,13 @@
 # Expérience principale
 
-Sweep de référence retenu pour l'article : **5 méthodes** (efficientmatch_3 avec mu=3 par défaut,
+Sweep de référence retenu pour l'article : **5 méthodes** (efficientmatch avec mu=3 par défaut,
 fixmatch, flexmatch, mixmatch, regmixmatch avec mu=7 par défaut) sur **5 configurations** (SVHN 250
 labels, CIFAR-10 250 labels, CIFAR-10 4000 labels, CIFAR-100 10000 labels, CIFAR-100 2500 labels)
 et **3 seeds** (2312, 0308, 2701). Toute variante d'ablation (mu différent, efficientmatch
 v1/flex/2, sequencematch, regmixmatch_mu3, runs interrompus ou hors seeds retenues) est
 **volontairement exclue** de ce document — elle reste documentée dans
 `SEEDS_2312_308_2701_INVENTORY.md` (historique complet) et `EXPERIMENT_LOG.md`. **Seule exception :**
-la variante **efficientmatch_freematch** (efficientmatch_3 + seuillage adaptatif de FreeMatch,
+la variante **efficientmatch_freematch** (efficientmatch + seuillage adaptatif de FreeMatch,
 option `--freematch_threshold`), reportée en ligne supplémentaire "(variante)" dans chaque tableau
 et résumée dans la section dédiée ci-dessous ; elle ne fait pas partie des 5 méthodes de référence.
 
@@ -42,7 +42,7 @@ mentionné en commentaire dans la ligne du tableau.
 |---|---:|---:|---:|---:|---:|
 | regmixmatch | 5 500 | 10.3 min | 10.2 min | 90.51% | 10 405 TFLOPs |
 | mixmatch | 18 500 | 6.8 min | 6.5 min | 90.27% | 5 580 TFLOPs |
-| efficientmatch_3 | 7 000 | 5.8 min | 5.7 min | 90.25% | 5 182 TFLOPs |
+| efficientmatch | 7 000 | 5.8 min | 5.7 min | 90.25% | 5 182 TFLOPs |
 | efficientmatch_freematch (variante) | 6 000 | 4.9 min | 4.8 min | 90.22% | 4 442 TFLOPs |
 | fixmatch | 8 000 | 7.8 min | 7.7 min | 90.01% | 6 801 TFLOPs |
 | flexmatch | 115 500 | 117.9 min | 115.8 min | 83.99% (max) | 98 187 TFLOPs — ❌ jamais atteint 90% (tué à 2h) |
@@ -52,7 +52,7 @@ mentionné en commentaire dans la ligne du tableau.
 | Méthode | Steps | Temps | Temps corrigé | Acc | FLOPs |
 |---|---:|---:|---:|---:|---:|
 | mixmatch | 52 500 | 18.4 min | 17.4 min | 91.06% | 15 836 TFLOPs |
-| efficientmatch_3 | 6 500 | 5.3 min | 5.2 min | 90.45% | 4 812 TFLOPs |
+| efficientmatch | 6 500 | 5.3 min | 5.2 min | 90.45% | 4 812 TFLOPs |
 | regmixmatch | 4 500 | 8.2 min | 8.2 min | 90.30% | 8 513 TFLOPs |
 | efficientmatch_freematch (variante) | 6 000 | 4.9 min | 4.8 min | 90.11% | 4 442 TFLOPs |
 | fixmatch | 6 500 | 6.4 min | 6.3 min | 90.07% | 5 526 TFLOPs |
@@ -65,7 +65,7 @@ mentionné en commentaire dans la ligne du tableau.
 | mixmatch | 35 000 | 12.4 min | 11.8 min | 90.82% | 10 557 TFLOPs |
 | regmixmatch | 6 000 | 11.3 min | 11.2 min | 90.37% | 11 351 TFLOPs |
 | fixmatch | 8 000 | 7.9 min | 7.7 min | 90.18% | 6 801 TFLOPs |
-| efficientmatch_3 | 8 000 | 6.5 min | 6.3 min | 90.15% | 5 923 TFLOPs |
+| efficientmatch | 8 000 | 6.5 min | 6.3 min | 90.15% | 5 923 TFLOPs |
 | efficientmatch_freematch (variante) | 6 000 | 4.9 min | 4.8 min | 90.03% | 4 442 TFLOPs |
 | flexmatch | 57 500 | 59.4 min | 58.4 min | 86.73% (max) | 48 881 TFLOPs — ❌ jamais atteint 90% (tué à 2h) |
 
@@ -73,7 +73,7 @@ mentionné en commentaire dans la ligne du tableau.
 2h à chaque fois) — problème méthodologique reproductible, pas un artefact de bug (le fix
 `thresh_warmup` déjà en place a été vérifié conforme à la référence officielle
 `microsoft/Semi-supervised-learning`). Parmi les 4 méthodes qui convergent, le classement varie
-d'une seed à l'autre entre regmixmatch, mixmatch, efficientmatch_3 et fixmatch, mais toutes restent
+d'une seed à l'autre entre regmixmatch, mixmatch, efficientmatch et fixmatch, mais toutes restent
 dans une fourchette étroite (5.2-18.4 min).
 
 ---
@@ -84,7 +84,7 @@ dans une fourchette étroite (5.2-18.4 min).
 
 | Méthode | Steps | Temps | Temps corrigé | Acc | FLOPs |
 |---|---:|---:|---:|---:|---:|
-| efficientmatch_3 | 42 000 | 30.4 min | 29.6 min | 80.11% | 31 095 TFLOPs |
+| efficientmatch | 42 000 | 30.4 min | 29.6 min | 80.11% | 31 095 TFLOPs |
 | fixmatch (run initiale, tronquée à 2h) | 69 500 | 111.8 min | 110.5 min | 78.62% (max) | 59 082 TFLOPs — ❌ jamais atteint 80% en 2h (la run initiale atteignait 80.06% à 272.5 min, hors budget) |
 | fixmatch (bis, même config) | 127 000 | 116.0 min | 113.7 min | 80.05% | 107 963 TFLOPs |
 | efficientmatch_freematch (variante) | 41 500 | 29.7 min | 29.0 min | 80.05% | 30 725 TFLOPs |
@@ -96,7 +96,7 @@ dans une fourchette étroite (5.2-18.4 min).
 
 | Méthode | Steps | Temps | Temps corrigé | Acc | FLOPs |
 |---|---:|---:|---:|---:|---:|
-| efficientmatch_3 | 28 500 | 20.9 min | 20.3 min | 80.37% | 21 100 TFLOPs |
+| efficientmatch | 28 500 | 20.9 min | 20.3 min | 80.37% | 21 100 TFLOPs |
 | efficientmatch_freematch (variante) | 21 500 | 15.7 min | 15.3 min | 80.27% | 15 918 TFLOPs |
 | flexmatch | 52 500 | 52.3 min | 51.3 min | 80.16% | 44 630 TFLOPs |
 | mixmatch | 315 500 | 99.0 min | 93.2 min | 77.72% (max) | 95 167 TFLOPs — ❌ jamais atteint 80% en 2h (la run atteignait 80.07% à 276.6 min, hors budget) |
@@ -107,14 +107,14 @@ dans une fourchette étroite (5.2-18.4 min).
 
 | Méthode | Steps | Temps | Temps corrigé | Acc | FLOPs |
 |---|---:|---:|---:|---:|---:|
-| efficientmatch_3 | 25 000 | 18.3 min | 17.9 min | 80.16% | 18 509 TFLOPs |
+| efficientmatch | 25 000 | 18.3 min | 17.9 min | 80.16% | 18 509 TFLOPs |
 | regmixmatch | 21 000 | 36.5 min | 36.1 min | 80.20% | 39 729 TFLOPs |
 | flexmatch | 42 000 | 41.5 min | 40.7 min | 80.17% | 35 704 TFLOPs |
 | fixmatch | 61 500 | 57.4 min | 56.3 min | 80.15% | 52 281 TFLOPs |
 | mixmatch | 378 000 | 118.6 min | 111.6 min | 79.48% (max) | 114 020 TFLOPs — ❌ jamais atteint 80% en 2h (la run atteignait 80.10% à 145.6 min, hors budget) |
 | efficientmatch_freematch (variante) | 19 500 | 14.2 min | 13.9 min | 80.07% | 14 437 TFLOPs |
 
-**Synthèse** : **efficientmatch_3 est systématiquement le plus rapide** (18.3-30.4 min), suivi de
+**Synthèse** : **efficientmatch est systématiquement le plus rapide** (18.3-30.4 min), suivi de
 flexmatch et regmixmatch (classement variable selon la seed). **mixmatch est nettement le point
 faible de cette config** : **il n'atteint 80% dans le budget de 2h sur aucune des 3 seeds** (max 76.45%,
 77.72% et 79.48% ; hors budget, il atteignait 80% en 137-260 min corrigées sur les seeds 0308 et 2701 et
@@ -133,7 +133,7 @@ méthodologique systématique.
 | Méthode | Steps | Temps | Temps corrigé | Acc | FLOPs |
 |---|---:|---:|---:|---:|---:|
 | efficientmatch_freematch (variante) | 25 500 | 18.2 min | 17.7 min | 90.09% | 18 879 TFLOPs |
-| efficientmatch_3 | 41 000 | 29.0 min | 28.2 min | 90.06% | 30 354 TFLOPs |
+| efficientmatch | 41 000 | 29.0 min | 28.2 min | 90.06% | 30 354 TFLOPs |
 | regmixmatch | 25 000 | 43.4 min | 42.9 min | 90.05% | 47 296 TFLOPs |
 | fixmatch | 99 000 | 87.1 min | 85.2 min | 90.03% | 84 160 TFLOPs |
 | flexmatch | 60 500 | 59.2 min | 58.1 min | 90.02% | 51 431 TFLOPs |
@@ -144,7 +144,7 @@ méthodologique systématique.
 | Méthode | Steps | Temps | Temps corrigé | Acc | FLOPs |
 |---|---:|---:|---:|---:|---:|
 | efficientmatch_freematch (variante) | 28 500 | 20.2 min | 19.7 min | 90.12% | 21 100 TFLOPs |
-| efficientmatch_3 | 41 000 | 30.1 min | 29.3 min | 90.02% | 30 354 TFLOPs |
+| efficientmatch | 41 000 | 30.1 min | 29.3 min | 90.02% | 30 354 TFLOPs |
 | mixmatch | 213 500 | 63.6 min | 59.6 min | 90.05% | 64 400 TFLOPs |
 | regmixmatch | 27 000 | 46.7 min | 46.2 min | 90.02% | 51 080 TFLOPs |
 | fixmatch | 91 500 | 80.8 min | 79.1 min | 90.02% | 77 784 TFLOPs |
@@ -154,17 +154,17 @@ méthodologique systématique.
 
 | Méthode | Steps | Temps | Temps corrigé | Acc | FLOPs |
 |---|---:|---:|---:|---:|---:|
-| efficientmatch_3 (rejoué, temps propre) | 43 500 | 30.6 min | 29.8 min | 90.09% | 32 205 TFLOPs |
+| efficientmatch (rejoué, temps propre) | 43 500 | 30.6 min | 29.8 min | 90.09% | 32 205 TFLOPs |
 | efficientmatch_freematch (variante) | 31 000 | 22.0 min | 21.4 min | 90.05% | 22 951 TFLOPs |
 | regmixmatch | 27 000 | 47.7 min | 47.2 min | 90.06% | 51 080 TFLOPs |
 | mixmatch | 165 500 | 49.3 min | 46.3 min | 90.04% | 49 921 TFLOPs |
 | flexmatch | 83 500 | 78.3 min | 76.8 min | 90.03% | 70 983 TFLOPs |
 | fixmatch | 100 500 | 88.8 min | 86.9 min | 90.15% | 85 435 TFLOPs |
 
-**Synthèse** : **efficientmatch_3 est systématiquement le plus rapide et le plus économe en FLOPs**
+**Synthèse** : **efficientmatch est systématiquement le plus rapide et le plus économe en FLOPs**
 parmi les 5 méthodes de référence (29.0-30.1 min, 30.4-32.2k TFLOPs), suivi de regmixmatch et
 mixmatch en milieu de classement. flexmatch et fixmatch restent les plus lents, sans ordre stable
-entre eux selon la seed. La run efficientmatch_3 de la seed 2701 a été rejouée : la première
+entre eux selon la seed. La run efficientmatch de la seed 2701 a été rejouée : la première
 mesure (41.1 min, 57 ms/step) était gonflée d'environ 30% par la machine, le temps propre est de
 30.6 min à 42 ms/step (cf. "Fiabilité des temps" ci-dessous).
 
@@ -177,7 +177,7 @@ mesure (41.1 min, 57 ms/step) était gonflée d'environ 30% par la machine, le t
 | Méthode | Steps | Temps | Temps corrigé | Acc | FLOPs |
 |---|---:|---:|---:|---:|---:|
 | mixmatch | 12 288 | 10.2 min | 9.6 min | 60.34% | 14 628 TFLOPs |
-| efficientmatch_3 | 10 240 | 19.8 min | 18.8 min | 60.00% | 29 921 TFLOPs |
+| efficientmatch | 10 240 | 19.8 min | 18.8 min | 60.00% | 29 921 TFLOPs |
 | regmixmatch | 5 376 | 25.1 min | 24.6 min | 60.07% | 40 143 TFLOPs |
 | fixmatch | 12 544 | 29.0 min | 27.8 min | 60.00% | 42 084 TFLOPs |
 | flexmatch | 13 568 | 33.7 min | 32.3 min | 60.06% | 45 519 TFLOPs |
@@ -187,7 +187,7 @@ mesure (41.1 min, 57 ms/step) était gonflée d'environ 30% par la machine, le t
 | Méthode | Steps | Temps | Temps corrigé | Acc | FLOPs |
 |---|---:|---:|---:|---:|---:|
 | mixmatch | 12 800 | 11.3 min | 10.0 min | 60.08% | 15 238 TFLOPs |
-| efficientmatch_3 | 10 240 | 21.4 min | 20.4 min | 60.29% | 29 921 TFLOPs |
+| efficientmatch | 10 240 | 21.4 min | 20.4 min | 60.29% | 29 921 TFLOPs |
 | regmixmatch | 5 888 | 28.0 min | 27.4 min | 60.31% | 43 966 TFLOPs |
 | fixmatch | 12 800 | 29.2 min | 28.0 min | 60.01% | 42 942 TFLOPs |
 | flexmatch | 12 288 | 30.5 min | 29.2 min | 60.51% | 41 225 TFLOPs |
@@ -198,13 +198,13 @@ mesure (41.1 min, 57 ms/step) était gonflée d'environ 30% par la machine, le t
 |---|---:|---:|---:|---:|---:|
 | mixmatch | 13 568 | 11.9 min | 10.6 min | 60.11% | 16 152 TFLOPs |
 | regmixmatch | 6 144 | 25.2 min | 24.6 min | 60.14% | 45 877 TFLOPs |
-| efficientmatch_3 | 9 728 | 25.3 min | 24.3 min | 60.05% | 28 425 TFLOPs |
+| efficientmatch | 9 728 | 25.3 min | 24.3 min | 60.05% | 28 425 TFLOPs |
 | flexmatch | 11 264 | 26.0 min | 24.9 min | 60.20% | 37 789 TFLOPs |
 | fixmatch | 13 568 | 31.1 min | 29.7 min | 60.00% | 45 519 TFLOPs |
 
 **Synthèse** : **mixmatch est systématiquement le plus rapide et le plus économe en FLOPs** sur
 cette config (9.6-20.4 min corrigé selon la seed, 14.6-16.2k TFLOPs quand il domine), suivi
-d'efficientmatch_3 (18.8-24.3 min). regmixmatch et fixmatch se tiennent en milieu de classement
+d'efficientmatch (18.8-24.3 min). regmixmatch et fixmatch se tiennent en milieu de classement
 (~24-28 min), flexmatch est le plus lent des méthodes qui convergent (25-33 min). **Couverture
 désormais complète sur les 3 seeds pour les 5 méthodes.**
 
@@ -219,7 +219,7 @@ désormais complète sur les 3 seeds pour les 5 méthodes.**
 | regmixmatch (rejoué, temps propre) | 17 500 | 61.9 min | 61.0 min | 50.41% | 130 673 TFLOPs |
 | flexmatch | 31 500 | 70.8 min | 69.2 min | 50.25% | 105 679 TFLOPs |
 | efficientmatch_freematch (variante) | 16 000 | 29.8 min | 29.0 min | 50.18% | 46 751 TFLOPs |
-| efficientmatch_3 | 30 464 | 58.1 min | 55.1 min | 50.11% | 89 014 TFLOPs |
+| efficientmatch | 30 464 | 58.1 min | 55.1 min | 50.11% | 89 014 TFLOPs |
 | fixmatch | 54 000 | 119.2 min | 116.5 min | 46.81% (max) | 181 164 TFLOPs — ❌ jamais atteint 50% |
 | mixmatch | 84 000 | 67.9 min | 63.7 min | 46.35% (max) | 99 996 TFLOPs — ❌ jamais atteint 50% |
 
@@ -230,7 +230,7 @@ désormais complète sur les 3 seeds pour les 5 méthodes.**
 | efficientmatch_freematch (variante) | 14 500 | 27.1 min | 26.3 min | 51.04% | 42 368 TFLOPs |
 | flexmatch | 38 000 | 84.8 min | 82.8 min | 50.99% | 127 485 TFLOPs |
 | regmixmatch | 15 000 | 53.3 min | 52.5 min | 50.50% | 112 005 TFLOPs |
-| efficientmatch_3 | 26 500 | 49.5 min | 48.1 min | 50.12% | 77 431 TFLOPs |
+| efficientmatch | 26 500 | 49.5 min | 48.1 min | 50.12% | 77 431 TFLOPs |
 | fixmatch | 48 500 | 107.3 min | 104.8 min | 48.13% (max) | 162 712 TFLOPs — ❌ jamais atteint 50% |
 | mixmatch | 125 000 | 98.4 min | 92.1 min | 46.48% (max) | 148 804 TFLOPs — ❌ jamais atteint 50% |
 
@@ -241,14 +241,14 @@ désormais complète sur les 3 seeds pour les 5 méthodes.**
 | efficientmatch_freematch (variante) | 16 000 | 29.7 min | 28.9 min | 50.60% | 46 751 TFLOPs |
 | regmixmatch | 20 000 | 71.1 min | 70.1 min | 50.56% | 149 340 TFLOPs |
 | flexmatch | 31 500 | 69.6 min | 68.0 min | 50.45% | 105 679 TFLOPs |
-| efficientmatch_3 | 32 000 | 59.6 min | 58.0 min | 50.40% | 93 502 TFLOPs |
+| efficientmatch | 32 000 | 59.6 min | 58.0 min | 50.40% | 93 502 TFLOPs |
 | fixmatch | 53 000 | 116.0 min | 113.4 min | 47.04% (max) | 177 809 TFLOPs — ❌ jamais atteint 50% |
 | mixmatch | 137 500 | 108.0 min | 101.1 min | 45.72% (max) | 163 684 TFLOPs — ❌ jamais atteint 50% (tué à 2h) |
 
-**Synthèse** : **efficientmatch_3 est systématiquement le plus rapide et le moins coûteux en
+**Synthèse** : **efficientmatch est systématiquement le plus rapide et le moins coûteux en
 FLOPs** parmi les méthodes qui convergent (48.1-58.1 min corrigé, 77-93k TFLOPs), devant regmixmatch
 et flexmatch (classement variable selon la seed, 52.5-82.8 min ; regmixmatch, rejoué sur la seed
-2312 avec un temps propre de 61.0 min, passe derrière efficientmatch_3 au lieu des 85.6 min
+2312 avec un temps propre de 61.0 min, passe derrière efficientmatch au lieu des 85.6 min
 gonflés de la première mesure). **fixmatch et mixmatch échouent
 systématiquement à atteindre 50%** sur les 3 seeds, plafonnant respectivement autour de 46-48% et
 45-47% avant d'être arrêtés par le plafond watchdog de 2h (sur les 3 seeds pour les deux méthodes) —
@@ -264,7 +264,7 @@ l'accuracy de fixmatch et mixmatch oscille en fin de run, leur pic peut donc pr�
 
 ## Variante efficientmatch_freematch (seuillage adaptatif FreeMatch)
 
-efficientmatch_3 dont le seuil de confiance fixe (tau = 0.95) est remplacé par le seuillage
+efficientmatch dont le seuil de confiance fixe (tau = 0.95) est remplacé par le seuillage
 adaptatif de FreeMatch tel qu'implémenté dans `regmixmatch.py` : `seuil = time_p × p_model[classe] /
 max(p_model)`, avec `time_p` et `p_model` suivis par EMA (0.999) sur les prédictions faibles,
 initialisés à 1/nb_classes (init standard de FreeMatch — `regmixmatch.py` utilise à la place un
@@ -279,7 +279,7 @@ multiplication, division, comparaison ou max ; indexation et copies = 0 ; le `>=
 présent avec un tau fixe, donc pas un surcoût) dans `run_analysis.freematch_threshold_flops`, et
 ajoutées au coût mesuré du modèle dans `flops_analysis.py` :
 
-| Architecture / config | efficientmatch_3 | efficientmatch_freematch | Surcoût du seuillage |
+| Architecture / config | efficientmatch | efficientmatch_freematch | Surcoût du seuillage |
 |---|---:|---:|---:|
 | WRN-28-2, CIFAR-10 (10 classes) | 740 351 508 480 FLOPs/it | 740 351 510 836 | +2 356 (3.2e-9 relatif) |
 | WRN-28-2, SVHN (10 classes, borne active) | 740 351 508 480 | 740 351 511 220 | +2 740 (3.7e-9) |
@@ -289,7 +289,7 @@ Sur une run complète le seuillage représente au plus 3.2e8 FLOPs (CIFAR-100 25
 les TFLOPs des tableaux ci-dessus (arrondis à l'unité) sont donc identiques à ceux d'un calcul
 sans le surcoût — c'est le résultat exact, pas une approximation.
 
-**Gain vs efficientmatch_3, 3 seeds** (steps = métrique indépendante du matériel ; le temps corrigé
+**Gain vs efficientmatch, 3 seeds** (steps = métrique indépendante du matériel ; le temps corrigé
 donne des écarts quasi identiques) :
 
 | Config | Seed 2312 | Seed 0308 | Seed 2701 | Moyenne |
@@ -329,10 +329,10 @@ médiane de la même méthode et config) :
 
 | Run | ms/step | Médiane | Traitement |
 |---|---:|---:|---|
-| efficientmatch_3, CIFAR-10 4000, seed 2701 | 57.4 | 44 | **rejouée** : 30.6 min à 42 ms/step (au lieu de 41.1 min) |
+| efficientmatch, CIFAR-10 4000, seed 2701 | 57.4 | 44 | **rejouée** : 30.6 min à 42 ms/step (au lieu de 41.1 min) |
 | regmixmatch, CIFAR-100 2500, seed 2312 | 273 | 213 | **rejouée** : 61.9 min à 212 ms/step (au lieu de 87.5 min) |
 | mixmatch, CIFAR-10 250, seed 2312 | 56.5 | 18.8 | **non rejouée** : résultat tronqué à 2h (119 500 steps, 76.45% max) ; à vitesse nominale, la même fenêtre de 2h couvrirait davantage de steps |
-| efficientmatch_3, CIFAR-100 10000, seed 2701 | 156 | 126 | non rejouée : temps estimé ≈ 20 min au lieu de 25.3 min |
+| efficientmatch, CIFAR-100 10000, seed 2701 | 156 | 126 | non rejouée : temps estimé ≈ 20 min au lieu de 25.3 min |
 
 Les deux reruns ont remplacé les anciens résultats (récupérables via l'historique git).
 
@@ -340,7 +340,7 @@ Les deux reruns ont remplacé les anciens résultats (récupérables via l'histo
 
 ## Vue d'ensemble
 
-| Config | efficientmatch_3 | fixmatch | flexmatch | mixmatch | regmixmatch |
+| Config | efficientmatch | fixmatch | flexmatch | mixmatch | regmixmatch |
 |---|:---:|:---:|:---:|:---:|:---:|
 | SVHN, 250 labels | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 (**0/3 atteint 90%**) | ✅ 3/3 | ✅ 3/3 |
 | CIFAR-10, 250 labels | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 (**0/3 atteint 80% en 2h**) | ✅ 3/3 |

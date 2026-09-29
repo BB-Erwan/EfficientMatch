@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 seed = int(sys.argv[1]) if len(sys.argv) > 1 else 2312
-VARIANTS = [("efficientmatch_3_ema_mixw0.5", "0.5"), ("efficientmatch_3_ema", "1"), ("efficientmatch_3_ema_mixw2.0", "2")]
+VARIANTS = [("efficientmatch_ema_mixw0.5", "0.5"), ("efficientmatch_ema", "1"), ("efficientmatch_ema_mixw2.0", "2")]
 plt.rcParams.update({"font.family": "serif", "mathtext.fontset": "dejavuserif", "font.size": 11, "axes.titlesize": 12,
                      "axes.labelsize": 12, "xtick.labelsize": 10, "ytick.labelsize": 10, "legend.fontsize": 8})
 d = os.path.join(ROOT, "results", f"cifar10-labeled-250-seed-{seed}")

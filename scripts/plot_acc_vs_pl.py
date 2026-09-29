@@ -8,7 +8,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 p = argparse.ArgumentParser()
 p.add_argument("--dataset", default="cifar10"); p.add_argument("--num_labeled", type=int, default=250)
 p.add_argument("--seed", type=int, default=2701)
-p.add_argument("--methods", nargs="+", default=["efficientmatch_3"])
+p.add_argument("--methods", nargs="+", default=["efficientmatch"])
 p.add_argument("--ymin", type=float, default=50); p.add_argument("--ymax", type=float, default=84)
 p.add_argument("--overwrite", action="store_true")
 a = p.parse_args()
@@ -26,7 +26,7 @@ for m in a.methods:
     ax.plot(t, [100 * v for v in j["pl_quality"]], label="Pseudo-label quality", lw=1.5)
     ax.set_ylim(a.ymin, a.ymax)
     ax.set_xlabel("Time (min)"); ax.set_ylabel("Accuracy (%)")
-    name = "efficientmatch" if m == "efficientmatch_3" else m
+    name = m
     ax.set_title(name, fontweight="bold")
     ax.grid(alpha=0.3, lw=0.5)
     ax.legend(loc="lower right", fontsize=8, frameon=True, framealpha=0.85)

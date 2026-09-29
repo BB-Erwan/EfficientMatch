@@ -1,6 +1,6 @@
-# Étude d'hyperparamètre : coefficient de la loss Mixup (mixup_weight) — efficientmatch_3
+# Étude d'hyperparamètre : coefficient de la loss Mixup (mixup_weight) — efficientmatch
 
-Un poids `mixup_weight` a été ajouté au script `efficientmatch_3.py` pour pondérer explicitement le
+Un poids `mixup_weight` a été ajouté au script `efficientmatch.py` pour pondérer explicitement le
 terme `loss_mixup` dans la loss totale (`loss = loss_supervised + loss_consistency +
 mixup_weight * loss_mixup`). La valeur par défaut est **mixup_weight=1** (poids implicite d'origine,
 non pondéré). Cette étude compare mixup_weight ∈ {0.5, 1, 2} sur **CIFAR-10, 250 labels**
@@ -53,15 +53,15 @@ non pondéré). Cette étude compare mixup_weight ∈ {0.5, 1, 2} sur **CIFAR-10
   une pondération égale entre les trois termes de la loss) est déjà proche d'un optimum local sur les
   3 seeds testées — ni réduire ni augmenter ce poids n'apporte de gain en efficacité, et
   sous-pondérer le terme Mixup coûte significativement plus cher en FLOPs totaux que le
-  sur-pondérer. Cela confirme que le canal Mixup d'efficientmatch_3 est correctement calibré par
+  sur-pondérer. Cela confirme que le canal Mixup d'efficientmatch est correctement calibré par
   défaut et ne nécessite pas de réglage fin supplémentaire de son poids relatif.
 
 ## Reproduire
 
 ```bash
-python efficientmatch_3.py --dataset cifar10 --num_labeled 250 --seed 2312 --target_acc 0.80 --mixup_weight 0.5
-python efficientmatch_3.py --dataset cifar10 --num_labeled 250 --seed 2312 --target_acc 0.80 --mixup_weight 1
-python efficientmatch_3.py --dataset cifar10 --num_labeled 250 --seed 2312 --target_acc 0.80 --mixup_weight 2
+python efficientmatch.py --dataset cifar10 --num_labeled 250 --seed 2312 --target_acc 0.80 --mixup_weight 0.5
+python efficientmatch.py --dataset cifar10 --num_labeled 250 --seed 2312 --target_acc 0.80 --mixup_weight 1
+python efficientmatch.py --dataset cifar10 --num_labeled 250 --seed 2312 --target_acc 0.80 --mixup_weight 2
 # répéter pour --seed 308 et --seed 2701
 ```
 

@@ -1,5 +1,5 @@
 """Mesure le nombre de FLOPs par itération (forward + backward) de chaque méthode SSL de
-`scripts/` (fixmatch, flexmatch, mixmatch, efficientmatch, sequencematch), sur des tenseurs
+`scripts/` (fixmatch, flexmatch, mixmatch, efficientmatch, regmixmatch), sur des tenseurs
 factices (dummy tensors) de la bonne forme -- pas de CIFAR-10, pas de dataloader, pas de run
 réel. Chaque fonction `<methode>_iter_flops` reproduit fidèlement la séquence d'appels au modèle
 (nombre de forward, tailles de batch, no_grad éventuel) telle qu'elle apparaît dans
@@ -38,16 +38,15 @@ MU = {
     "flexmatch": 7,
     "mixmatch": 1,
     "efficientmatch": 3,
-    "efficientmatch_2": 3,
-    "efficientmatch_3": 3,
+    "efficientmatch_hard": 3,
+    "efficientmatch_soft": 3,
     "efficientmatch_freematch": 3,
     "efficientmatch_freematch_svhn": 3,
     "efficientmatch_freematch_c100": 3,
-    "efficientmatch_3_mu1": 1,
-    "efficientmatch_3_mu5": 5,
-    "efficientmatch_3_mu7": 7,
+    "efficientmatch_mu1": 1,
+    "efficientmatch_mu5": 5,
+    "efficientmatch_mu7": 7,
     "efficientmatch_flex_mu2": 2,
-    "sequencematch": 7,
     "regmixmatch": 7,
     "regmixmatch_mu3": 3,
 }
@@ -138,8 +137,8 @@ def mixmatch_iter_flops(model, device):
 
 
 def efficientmatch_iter_flops(model, device, mu=None):
-    """1 forward no_grad (pseudo-labels, mu*B) + 2 forward+backward fusionnés dans le même
-    graphe (B + mu*B chacun) : un forward FixMatch-like et un forward sur le mélange mixup."""
+    """1 no-grad forward for pseudo-labels (mu*B), then 2 forward+backward passes of size
+    B + mu*B each: the FixMatch-like fused pass and the pass over the mixed batch."""
     B, muB = BATCH_SIZE_L, (mu if mu is not None else MU["efficientmatch"]) * BATCH_SIZE_L
     x_l, y_l = _dummy_images(B, device), _dummy_labels(B, device)
     x_u_w, x_u_s = _dummy_images(muB, device), _dummy_images(muB, device)
@@ -182,25 +181,23 @@ def efficientmatch_iter_flops(model, device, mu=None):
     return fc.get_total_flops()
 
 
-def efficientmatch_2_iter_flops(model, device, mu=None):
-    """Same forward-call sequence as efficientmatch: efficientmatch_2 only changes the mixup
-    loss formula (a plain scalar-index cross_entropy vs. the two-term split above), which is an
-    elementwise/reduction op that FlopCounterMode doesn't attribute matmul/conv FLOPs to -- the
-    model() calls and their shapes are identical, so the FLOPs/iter are the same."""
+def efficientmatch_hard_iter_flops(model, device, mu=None):
+    """Mixing-target ablation (paper Table 8, "Hard"). Only the Mixup loss formula changes -- an
+    elementwise/reduction op that FlopCounterMode does not attribute conv/matmul FLOPs to. The
+    model() calls and their shapes are identical, so the FLOPs/iteration are unchanged."""
     return efficientmatch_iter_flops(model, device, mu)
 
 
-def efficientmatch_3_iter_flops(model, device, mu=None):
-    """Same forward-call sequence as efficientmatch/efficientmatch_2: efficientmatch_3 only
-    removes the .argmax(dim=1) from the mixup cross_entropy target (soft vs. hard labels), which
-    doesn't change any model() call or tensor shape, so the FLOPs/iter are the same."""
+def efficientmatch_soft_iter_flops(model, device, mu=None):
+    """Mixing-target ablation (paper Table 8, "Soft"). Only drops the .argmax(dim=1) on the Mixup
+    cross-entropy target, which changes no model() call nor tensor shape: same FLOPs/iteration."""
     return efficientmatch_iter_flops(model, device, mu)
 
 
 def efficientmatch_freematch_iter_flops(model, device, mu=None, num_classes=NUM_CLASSES, svhn_clamp=False):
-    """efficientmatch_3 + FreeMatch's self-adaptive thresholding (--freematch_threshold).
+    """efficientmatch + FreeMatch's self-adaptive thresholding (--freematch_threshold).
 
-    Same model() call sequence as efficientmatch_3 (measured by FlopCounterMode, which only counts
+    Same model() call sequence as efficientmatch (measured by FlopCounterMode, which only counts
     conv/matmul FLOPs), PLUS the element-wise operations of the thresholding (EMA trackers, mean,
     max, product, compare), which FlopCounterMode does not see and are therefore counted by hand
     in run_analysis.freematch_threshold_flops (dependent on the number of classes and on the SVHN
@@ -244,53 +241,20 @@ def regmixmatch_iter_flops(model, device, mu=None):
     return fc.get_total_flops()
 
 
-def sequencematch_iter_flops(model, device):
-    """1 seul forward+backward sur la concaténation labeled + 3 vues non labellisées
-    (faible/médium/forte) : B + 3*mu*B."""
-    B, muB = BATCH_SIZE_L, MU["sequencematch"] * BATCH_SIZE_L
-    x_l, y_l = _dummy_images(B, device), _dummy_labels(B, device)
-    x_u_w, x_u_m, x_u_s = _dummy_images(muB, device), _dummy_images(muB, device), _dummy_images(muB, device)
-
-    model.zero_grad(set_to_none=True)
-    with FlopCounterMode(display=False) as fc:
-        all_logits = model(torch.cat([x_l, x_u_w, x_u_m, x_u_s], dim=0))
-        logits_l = all_logits[:B]
-        logits_w = all_logits[B:B + muB]
-        logits_m = all_logits[B + muB:B + 2 * muB]
-        logits_s = all_logits[B + 2 * muB:]
-
-        sup_loss = F.cross_entropy(logits_l, y_l)
-        tgt_w = F.softmax(logits_w.detach() / 0.5, dim=-1)
-        tgt_m = F.softmax(logits_m.detach() / 0.5, dim=-1)
-        mask = torch.ones(muB, device=device)
-
-        unsup_loss = (
-            (F.cross_entropy(logits_s, logits_w.detach().argmax(-1), reduction="none") * mask).mean()
-            + (F.kl_div(F.log_softmax(logits_m, dim=-1), tgt_w, reduction="none").sum(-1) * mask).mean()
-            + (F.kl_div(F.log_softmax(logits_s, dim=-1), tgt_m, reduction="none").sum(-1) * mask).mean()
-            + (F.kl_div(F.log_softmax(logits_s, dim=-1), tgt_w, reduction="none").sum(-1) * mask).mean()
-        )
-        loss = sup_loss + unsup_loss
-        loss.backward()
-    model.zero_grad(set_to_none=True)
-    return fc.get_total_flops()
-
-
 METHODS = {
     "fixmatch": fixmatch_iter_flops,
     "flexmatch": flexmatch_iter_flops,
     "mixmatch": mixmatch_iter_flops,
     "efficientmatch": efficientmatch_iter_flops,
-    "efficientmatch_2": efficientmatch_2_iter_flops,
-    "efficientmatch_3": efficientmatch_3_iter_flops,
+    "efficientmatch_hard": efficientmatch_hard_iter_flops,
+    "efficientmatch_soft": efficientmatch_soft_iter_flops,
     "efficientmatch_freematch": efficientmatch_freematch_iter_flops,
     "efficientmatch_freematch_svhn": partial(efficientmatch_freematch_iter_flops, svhn_clamp=True),
     "efficientmatch_freematch_c100": partial(efficientmatch_freematch_iter_flops, num_classes=100),
-    "efficientmatch_3_mu1": partial(efficientmatch_3_iter_flops, mu=MU["efficientmatch_3_mu1"]),
-    "efficientmatch_3_mu5": partial(efficientmatch_3_iter_flops, mu=MU["efficientmatch_3_mu5"]),
-    "efficientmatch_3_mu7": partial(efficientmatch_3_iter_flops, mu=MU["efficientmatch_3_mu7"]),
+    "efficientmatch_mu1": partial(efficientmatch_iter_flops, mu=MU["efficientmatch_mu1"]),
+    "efficientmatch_mu5": partial(efficientmatch_iter_flops, mu=MU["efficientmatch_mu5"]),
+    "efficientmatch_mu7": partial(efficientmatch_iter_flops, mu=MU["efficientmatch_mu7"]),
     "efficientmatch_flex_mu2": partial(efficientmatch_iter_flops, mu=MU["efficientmatch_flex_mu2"]),
-    "sequencematch": sequencematch_iter_flops,
     "regmixmatch": regmixmatch_iter_flops,
     "regmixmatch_mu3": partial(regmixmatch_iter_flops, mu=MU["regmixmatch_mu3"]),
 }

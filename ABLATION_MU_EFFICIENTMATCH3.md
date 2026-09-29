@@ -1,8 +1,8 @@
-# Étude d'hyperparamètre : mu (nombre de vues non labellisées) — efficientmatch_3
+# Étude d'hyperparamètre : mu (nombre de vues non labellisées) — efficientmatch
 
-**mu** contrôle le nombre de vues non labellisées traitées par itération dans efficientmatch_3
+**mu** contrôle le nombre de vues non labellisées traitées par itération dans efficientmatch
 (analogue au ratio non-labellisé:labellisé des méthodes de type FixMatch, où mu=7 est la valeur de
-référence historique). efficientmatch_3 utilise **mu=3 par défaut**. Cette étude compare mu ∈
+référence historique). efficientmatch utilise **mu=3 par défaut**. Cette étude compare mu ∈
 {1, 3, 5, 7} sur deux régimes de labels de CIFAR-10, WRN-28-2, **complète sur les 3 seeds**
 (2312, 0308, 2701) dans les deux cas :
 
@@ -77,7 +77,7 @@ cf. `FLOPS_RESULTS.md`) :
   (~80.0-80.4% sur les 3 seeds, toutes valeurs de mu confondues) et le choix de mu devient un
   arbitrage temps/FLOPs plutôt qu'un arbitrage de qualité : **mu=3 domine strictement mu=5 et mu=7
   en FLOPs totaux sur les 3 seeds**, pour une accuracy équivalente — d'où le choix de mu=3 comme
-  valeur par défaut d'efficientmatch_3.
+  valeur par défaut d'efficientmatch.
 
 ## Résultats complets — CIFAR-10, 4000 labels, 3 seeds
 
@@ -131,24 +131,24 @@ reste systématiquement plus lent et plus coûteux en FLOPs que mu=3.
   instable, à 4000 labels toutes les valeurs de mu testées convergent de façon fiable sur les 3
   seeds — le signal supervisé plus riche compense la pauvreté du signal non supervisé par vue. Le
   choix de mu reste néanmoins un arbitrage FLOPs pur : **mu=3 domine en FLOPs totaux sur les 3
-  seeds**, confirmant sa pertinence comme valeur par défaut d'efficientmatch_3 indépendamment du
+  seeds**, confirmant sa pertinence comme valeur par défaut d'efficientmatch indépendamment du
   régime de labels.
 
 ## Reproduire
 
 ```bash
 # CIFAR-10, 250 labels
-python efficientmatch_3.py --dataset cifar10 --num_labeled 250 --seed 2312 --target_acc 0.80 --mu 1
-python efficientmatch_3.py --dataset cifar10 --num_labeled 250 --seed 2312 --target_acc 0.80 --mu 3
-python efficientmatch_3.py --dataset cifar10 --num_labeled 250 --seed 2312 --target_acc 0.80 --mu 5
-python efficientmatch_3.py --dataset cifar10 --num_labeled 250 --seed 2312 --target_acc 0.80 --mu 7
+python efficientmatch.py --dataset cifar10 --num_labeled 250 --seed 2312 --target_acc 0.80 --mu 1
+python efficientmatch.py --dataset cifar10 --num_labeled 250 --seed 2312 --target_acc 0.80 --mu 3
+python efficientmatch.py --dataset cifar10 --num_labeled 250 --seed 2312 --target_acc 0.80 --mu 5
+python efficientmatch.py --dataset cifar10 --num_labeled 250 --seed 2312 --target_acc 0.80 --mu 7
 # répéter pour --seed 308 et --seed 2701
 
 # CIFAR-10, 4000 labels
-python efficientmatch_3.py --dataset cifar10 --num_labeled 4000 --seed 2312 --target_acc 0.90 --mu 1
-python efficientmatch_3.py --dataset cifar10 --num_labeled 4000 --seed 2312 --target_acc 0.90 --mu 3
-python efficientmatch_3.py --dataset cifar10 --num_labeled 4000 --seed 2312 --target_acc 0.90 --mu 5
-python efficientmatch_3.py --dataset cifar10 --num_labeled 4000 --seed 2312 --target_acc 0.90 --mu 7
+python efficientmatch.py --dataset cifar10 --num_labeled 4000 --seed 2312 --target_acc 0.90 --mu 1
+python efficientmatch.py --dataset cifar10 --num_labeled 4000 --seed 2312 --target_acc 0.90 --mu 3
+python efficientmatch.py --dataset cifar10 --num_labeled 4000 --seed 2312 --target_acc 0.90 --mu 5
+python efficientmatch.py --dataset cifar10 --num_labeled 4000 --seed 2312 --target_acc 0.90 --mu 7
 # répéter pour --seed 308 et --seed 2701
 ```
 

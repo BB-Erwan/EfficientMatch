@@ -1,12 +1,12 @@
-"""Accuracy curves of the mixup_weight ablation (efficientmatch_3, CIFAR-10 250 labels)."""
+"""Accuracy curves of the mixup_weight ablation (efficientmatch, CIFAR-10 250 labels)."""
 import json, os
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VARIANTS = [("efficientmatch_3_ema_mixw0.5", r"$\lambda_{mix}$=0.5"), ("efficientmatch_3_ema", r"$\lambda_{mix}$=1"),
-            ("efficientmatch_3_ema_mixw2.0", r"$\lambda_{mix}$=2")]
+VARIANTS = [("efficientmatch_ema_mixw0.5", r"$\lambda_{mix}$=0.5"), ("efficientmatch_ema", r"$\lambda_{mix}$=1"),
+            ("efficientmatch_ema_mixw2.0", r"$\lambda_{mix}$=2")]
 plt.rcParams.update({"font.family": "serif", "mathtext.fontset": "dejavuserif", "font.size": 11, "axes.titlesize": 12,
                      "axes.labelsize": 12, "xtick.labelsize": 10, "ytick.labelsize": 10, "legend.fontsize": 9})
 for seed in (2312, 308, 2701):

@@ -13,21 +13,21 @@ hyperparamètres tranchés), voir `PROJECT_SPEC.md`. Ce document-ci ne répète 
 
 ## 1. Changements de code apportés en session
 
-### 1.1 Nouvelle variante `efficientmatch_2.py`
+### 1.1 Nouvelle variante `efficientmatch_hard.py`
 
-Une deuxième implémentation d'EfficientMatch a été créée (`scripts/efficientmatch_2.py`), quasi
+Une deuxième implémentation d'EfficientMatch a été créée (`scripts/efficientmatch_hard.py`), quasi
 identique à `efficientmatch.py` sauf sur le calcul de la perte Mixup :
 
 - **efficientmatch (v1)** : deux `cross_entropy` séparées, une sur la portion labellisée du batch
   mixé, une sur la portion non labellisée, chacune pondérée par son masque correspondant.
-- **efficientmatch_2** : une seule `cross_entropy` sur le batch mixé complet (labellisé +
+- **efficientmatch_hard** : une seule `cross_entropy` sur le batch mixé complet (labellisé +
   non labellisé concaténés), pondérée par le masque complet — fusion des deux forward en un seul
   calcul de perte. Autre différence : `mixup_targets_u` utilise le pseudo-label dur
   (`F.one_hot(pseudo, ...)`) plutôt que la distribution de probabilité molle `probs_u_w`.
 
-**Effet observé** : efficientmatch_2 est systématiquement aussi rapide ou plus rapide que
+**Effet observé** : efficientmatch_hard est systématiquement aussi rapide ou plus rapide que
 efficientmatch (v1) pour atteindre un seuil de performance donné (voir §3). Sur CIFAR-10 250
-labels/seed 2312, seuil 80% : efficientmatch_2 en 33.4 min contre 59.0 min pour la v1 (~1.8x plus
+labels/seed 2312, seuil 80% : efficientmatch_hard en 33.4 min contre 59.0 min pour la v1 (~1.8x plus
 rapide). Cause probable : le calcul fusionné réduit l'overhead de deux `cross_entropy` séparées, et
 l'usage du pseudo-label dur plutôt que la distribution molle pourrait donner un signal
 d'apprentissage plus net sur les pseudo-labels. **Non isolé/ablationné** — les deux changements
@@ -80,7 +80,7 @@ args.dataset != "cifar10" else ""`) dans les 6 scripts originaux, donc un run CI
 dans `results/labeled-{n}-seed-{s}/` alors que tous les runs historiques CIFAR-10 vivaient dans
 `results/cifar10-labeled-{n}-seed-{s}/` (dossier créé à la main ou par une version antérieure du
 code). Corrigé pour que le préfixe du dataset soit **toujours** inclus, dans les 6 scripts +
-`efficientmatch_2.py` + `supervised.py`. Les résultats déjà produits sous l'ancien schéma
+`efficientmatch_hard.py` + `supervised.py`. Les résultats déjà produits sous l'ancien schéma
 (`results/labeled-250-seed-2312/`, `results/labeled-250-seed-308/`) ont été déplacés à la main
 vers `results/cifar10-labeled-250-seed-*/`.
 
@@ -106,14 +106,14 @@ avant le début de cette session — mentionné ici pour contexte, pas un change
 - Sur cette RTX 5060 Ti, les scripts activent `torch.compile(mode="reduce-overhead")` (condition
   codée en dur sur `"5060 Ti" in torch.cuda.get_device_name(0)`), ce qui impose un **coût de
   compilation JIT ponctuel** de plusieurs minutes en début de run avant que la vitesse de croisière
-  ne soit atteinte (observé sur efficientmatch_2 et sur le premier run de `supervised.py`).
+  ne soit atteinte (observé sur efficientmatch_hard et sur le premier run de `supervised.py`).
 - OS Windows, exécution via `conda run -n DEEP-GPU python <script>.py`.
 
 ---
 
 ## 3. Résultats des expériences SSL (SVHN, 250 labels/classe budget)
 
-Sweep principal : **efficientmatch_2, fixmatch, flexmatch, mixmatch** sur **SVHN, 250 labels**,
+Sweep principal : **efficientmatch_hard, fixmatch, flexmatch, mixmatch** sur **SVHN, 250 labels**,
 seeds **2312, 0308, 2701**, `target_acc=0.90` (arrêt anticipé dès que l'accuracy EMA atteint 90%).
 `efficientmatch` (v1) a été testé une fois sur seed 2312 (90.05%, 6.3 min) puis volontairement
 exclu des seeds suivantes sur demande utilisateur.
@@ -121,27 +121,27 @@ exclu des seeds suivantes sur demande utilisateur.
 ### 3.1 Steps/temps/FLOPs pour atteindre 90% (SVHN, 250 labels)
 
 FLOPs/itération mesurés via `scripts/flops_analysis.py` (indépendants du device) :
-fixmatch/flexmatch = 850.10 GFLOPs, mixmatch = 301.64 GFLOPs, efficientmatch(v1)/efficientmatch_2
-≈ 740.35 GFLOPs (efficientmatch_2 non mesuré séparément par le script, valeur approximée par
+fixmatch/flexmatch = 850.10 GFLOPs, mixmatch = 301.64 GFLOPs, efficientmatch(v1)/efficientmatch_hard
+≈ 740.35 GFLOPs (efficientmatch_hard non mesuré séparément par le script, valeur approximée par
 celle d'efficientmatch v1 — mêmes formes de tenseurs).
 
 | Seed | Méthode | Steps | Temps | FLOPs totaux |
 |---|---|---:|---:|---:|
-| 2312 | efficientmatch_2 | 8500 | 405.7s (6.76 min) | 6 293.0 TFLOPs |
+| 2312 | efficientmatch_hard | 8500 | 405.7s (6.76 min) | 6 293.0 TFLOPs |
 | 2312 | fixmatch | 8000 | 469.4s (7.82 min) | 6 800.8 TFLOPs |
 | 2312 | mixmatch | 18500 | 408.8s (6.81 min) | **5 580.3 TFLOPs** |
 | 2312 | flexmatch | — | ❌ jamais atteint (max 15.96%, diverge) | — |
-| 0308 | efficientmatch_2 | 8500 | 405.5s (6.76 min) | 6 293.0 TFLOPs |
+| 0308 | efficientmatch_hard | 8500 | 405.5s (6.76 min) | 6 293.0 TFLOPs |
 | 0308 | fixmatch | 6500 | **386.1s (6.44 min)** | **5 525.7 TFLOPs** |
 | 0308 | mixmatch | 52500 | 1103.0s (18.38 min) | 15 836.1 TFLOPs |
 | 0308 | flexmatch | — | ❌ jamais atteint (max 82.38%, plateau) | — |
-| 2701 | efficientmatch_2 | 10000 | 471.4s (7.86 min) | 7 403.5 TFLOPs |
+| 2701 | efficientmatch_hard | 10000 | 471.4s (7.86 min) | 7 403.5 TFLOPs |
 | 2701 | fixmatch | 8000 | 473.8s (7.90 min) | **6 800.8 TFLOPs** |
 | 2701 | mixmatch | 35000 | 746.5s (12.44 min) | 10 557.4 TFLOPs |
 | 2701 | flexmatch | ~40000 | ❌ arrêté à 37.99 min (max 85.10%, jamais 90%) | ~34 000 TFLOPs (non atteint) |
 
 **Pas de vainqueur unique et cohérent d'une seed à l'autre** :
-- En **temps réel**, efficientmatch_2 et fixmatch sont systématiquement les deux plus rapides
+- En **temps réel**, efficientmatch_hard et fixmatch sont systématiquement les deux plus rapides
   (quasi ex æquo sur 2312 et 2701), mixmatch nettement plus lent sauf sur seed 2312.
 - En **FLOPs**, le classement s'inverse selon la seed : mixmatch gagne sur seed 2312 (moins de
   steps que d'habitude pour cette seed) mais devient le plus coûteux sur 0308 et 2701 (besoin de
@@ -157,10 +157,10 @@ celle d'efficientmatch v1 — mêmes formes de tenseurs).
 | fixmatch | 4500 | 4.9 min | 85.34% |
 | mixmatch | 9000 | 3.6 min | 85.52% |
 | efficientmatch (v1) | 7500 | 6.3 min | 85.59% |
-| efficientmatch_2 | 5500 | **4.7 min** | 85.69% |
+| efficientmatch_hard | 5500 | **4.7 min** | 85.69% |
 | flexmatch | — | jamais atteint | — |
 
-efficientmatch_2 franchit 85% plus vite qu'efficientmatch v1 (4.7 vs 6.3 min) et talonne fixmatch,
+efficientmatch_hard franchit 85% plus vite qu'efficientmatch v1 (4.7 vs 6.3 min) et talonne fixmatch,
 qui reste la référence de vitesse à ce seuil intermédiaire aussi.
 
 ---
@@ -170,11 +170,11 @@ qui reste la référence de vitesse à ce seuil intermédiaire aussi.
 ### 4.1 Comparaison à seuil 80% (seed 2312)
 
 Table historique complète (avant le début de cette session, mais réutilisée comme référence pour
-comparer efficientmatch_2) :
+comparer efficientmatch_hard) :
 
 | Méthode | Step | Temps |
 |---|---:|---:|
-| **efficientmatch_2** | 45000 | **33.4 min** |
+| **efficientmatch_hard** | 45000 | **33.4 min** |
 | efficientmatch_flex | 47000 | 34.8 min |
 | efficientmatch_flex_mu2 | 88000 | 50.7 min |
 | efficientmatch (v1) | 82000 | 59.0 min |
@@ -182,10 +182,10 @@ comparer efficientmatch_2) :
 | fixmatch | 170500 | 272.5 min |
 | mixmatch | — | jamais atteint 80% (max 78.42% après **13 heures**, 46780s, 1658 évaluations) |
 
-efficientmatch_2 est la méthode la plus rapide sur cette seed, ~1.8x plus rapide que efficientmatch
+efficientmatch_hard est la méthode la plus rapide sur cette seed, ~1.8x plus rapide que efficientmatch
 v1 et ~8x plus rapide que fixmatch.
 
-### 4.2 efficientmatch_2 sur seeds supplémentaires (CIFAR-10, seuil 80%)
+### 4.2 efficientmatch_hard sur seeds supplémentaires (CIFAR-10, seuil 80%)
 
 - **Seed 0308** : 90.35%(sic, en réalité seuil visé 80%, atteint) — atteint en **40.2 min**
   (2409.6s), plus lent que sur seed 2312 (33.4 min). Aucune donnée comparative des autres
@@ -196,7 +196,7 @@ v1 et ~8x plus rapide que fixmatch.
 - **Seed 666** : lancée par erreur en double avec seed 2701 (incident §6.2), résultat supprimé
   sans avoir été exploité.
 
-**Anomalie de dossier découverte puis corrigée** : les runs `efficientmatch_2` sur CIFAR-10
+**Anomalie de dossier découverte puis corrigée** : les runs `efficientmatch_hard` sur CIFAR-10
 écrivaient dans `results/labeled-250-seed-*/` (sans préfixe `cifar10-`) à cause du bug §1.6,
 alors que toutes les données historiques des autres méthodes vivent dans
 `results/cifar10-labeled-250-seed-*/`. Les fichiers ont été déplacés manuellement seed par seed
@@ -205,10 +205,10 @@ au fur et à mesure ; le bug est corrigé pour tout run futur.
 ### 4.3 CIFAR-10 seed 2701, target 80% (sweep en cours à la fin de la session)
 
 Sweep lancé après vérification qu'aucun résultat n'existait déjà pour cette combinaison :
-`efficientmatch_2, fixmatch, flexmatch, mixmatch`, `--dataset cifar10 --num_labeled 250 --seed
+`efficientmatch_hard, fixmatch, flexmatch, mixmatch`, `--dataset cifar10 --num_labeled 250 --seed
 2701 --target_acc 0.80`.
 
-- **efficientmatch_2** : atteint 80.00% au step 34000.
+- **efficientmatch_hard** : atteint 80.00% au step 34000.
 - **fixmatch** : en cours au moment de la clôture de ce journal (58.50% après 16 évaluations,
   7.14 min) — **résultat final non disponible**, à vérifier dans
   `results/cifar10-labeled-250-seed-2701/fixmatch_ema_metrics.json` à la reprise.
@@ -247,12 +247,12 @@ Deux runs fixmatch lancés en tout début de session sur CIFAR-100 (seed 2312) :
   l'utilisateur pour lancer d'autres priorités. N'a pas été relancé jusqu'à complétion dans cette
   session.
 
-### 6.2 Double lancement accidentel (efficientmatch_2, CIFAR-10 seeds 2701/666)
+### 6.2 Double lancement accidentel (efficientmatch_hard, CIFAR-10 seeds 2701/666)
 
 Un script d'attente basé sur `pgrep -f` (pour enchaîner un nouveau run seulement après la fin
 d'un précédent) a échoué à détecter des process encore actifs lancés depuis une autre session
 bash — `pgrep` sous Git Bash sur Windows ne voit pas fiablement les processus d'un autre arbre de
-process. Résultat : deux runs `efficientmatch_2` ont tourné en parallèle sur le même GPU (seeds
+process. Résultat : deux runs `efficientmatch_hard` ont tourné en parallèle sur le même GPU (seeds
 2701 et 666), dégradant les deux. Les deux ont été arrêtés et leurs résultats supprimés sur
 demande utilisateur. **Leçon opérationnelle** : ne plus utiliser `pgrep`/scripts d'attente pour
 séquencer des lancements — préférer attendre la notification de fin de tâche du harness avant de
@@ -283,9 +283,9 @@ l'anomalie de vitesse n'a pas été revérifiée avec ce nouveau backbone.
 - **`supervised.py`** (§6.3, §1.2) : script prêt mais jamais exécuté jusqu'au bout ; utile comme
   référence de plafond de performance (accuracy avec 100% des labels) à citer dans le papier en
   face des courbes SSL à faible budget de labels.
-- **Ablation efficientmatch_2 vs v1** (§1.1) : le gain de vitesse d'efficientmatch_2 mélange deux
+- **Ablation efficientmatch_hard vs v1** (§1.1) : le gain de vitesse d'efficientmatch_hard mélange deux
   changements (fusion de perte + pseudo-label dur) jamais isolés séparément — à faire si le papier
-  veut présenter efficientmatch_2 comme une amélioration justifiée mécanistiquement plutôt qu'une
+  veut présenter efficientmatch_hard comme une amélioration justifiée mécanistiquement plutôt qu'une
   variante empirique.
 - **Écart de matériel** (§2) : les mesures de temps de cette session (RTX 5060 Ti) ne sont pas
   directement comparables à `BENCHMARK_RESULTS.md` (RTX A4000) ni au hardware visé par
