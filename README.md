@@ -32,11 +32,13 @@ The fastest cell of the main table is EfficientMatch on SVHN, which reaches 90% 
 minutes:
 
 ```bash
-python scripts/efficientmatch.py --dataset svhn --num_labeled 250 --seed 2312 --target_acc 0.90
+python scripts/efficientmatch.py --dataset svhn --num_labeled 250 --seed 2312 --target_acc 0.90 --tag repro
 ```
 
-It writes `results/svhn-labeled-250-seed-2312/efficientmatch_ema_metrics.json`. Compare it with the
-other methods on that configuration:
+It writes `results/svhn-labeled-250-seed-2312/efficientmatch_ema_repro_metrics.json`, next to the
+paper's own `efficientmatch_ema_metrics.json` rather than over it: without `--tag`, a script run on a
+paper configuration overwrites the paper's result file. Compare your run with the paper's and with
+the other methods on that configuration:
 
 ```bash
 python scripts/run_analysis.py compare --dataset svhn --num_labeled 250 --seed 2312
