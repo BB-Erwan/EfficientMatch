@@ -19,7 +19,6 @@ set instead -- our other scripts never let training touch test data before an ev
 and there is no reason this one should either.
 """
 import argparse
-import json
 import logging
 import os
 import sys
@@ -29,56 +28,17 @@ from contextlib import nullcontext
 import numpy as np
 import torch
 import torch.nn.functional as F
-import torchvision
-import torchvision.transforms as transforms
 from torch.amp import autocast
-from torch.utils.data import DataLoader, Subset
-from torchvision.transforms import v2
 
-sys.path.append("..")  # add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from datasets_utils import TransformedDataset, TransformedDatasetWithIndex
-from models import build_model
-from utils import evaluate_f1_and_accuracy, build_lr_scheduler
-from ema import EMA
+from common.args import add_common_args, str2bool
+from common.data import build_loaders, build_transforms, class_counts, load_datasets, split_labeled_unlabeled
+from common.recording import evaluate_and_log, new_metrics, results_path
+from common.setup import build_model_and_optimizer, enable_runtime_optimizations, select_device
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
-
-
-def compute_pseudo_label_metrics(pseudo_labels, confidences, last_pseudo_labels, last_confidences, true_labels):
-    """Track how pseudo-labels evolve between two evaluations: new labels assigned,
-    corrections (wrong -> right) vs bad corrections (right -> wrong), and whether
-    confidence increases reinforce correct or incorrect labels."""
-    new_label = (pseudo_labels != last_pseudo_labels) & (last_pseudo_labels == -1)
-    existing_label_changes = (pseudo_labels != last_pseudo_labels) & (last_pseudo_labels != -1)
-    was_good_pseudo = last_pseudo_labels == true_labels
-    is_good_pseudo = pseudo_labels == true_labels
-    confidence_increased = confidences > last_confidences
-
-    return {
-        "pl_quality": is_good_pseudo.sum().item() / len(true_labels),
-        "corrections": (existing_label_changes & ~was_good_pseudo & is_good_pseudo).sum().item(),
-        "bad_corrections": (existing_label_changes & was_good_pseudo & ~is_good_pseudo).sum().item(),
-        "new_label": new_label.sum().item(),
-        "new_errors": (new_label & ~is_good_pseudo).sum().item(),
-        "new_correct": (new_label & is_good_pseudo).sum().item(),
-        "correct_reinforcement": (confidence_increased & is_good_pseudo & was_good_pseudo & ~new_label).sum().item(),
-        "error_reinforcement": (confidence_increased & ~is_good_pseudo & ~was_good_pseudo & ~new_label).sum().item(),
-    }
-
-
-def str2bool(v):
-    if isinstance(v, bool):
-        return v
-    if v.lower() in ("yes", "true", "t", "1", "y"):
-        return True
-    if v.lower() in ("no", "false", "f", "0", "n"):
-        return False
-    raise argparse.ArgumentTypeError("Boolean value expected.")
-
-
-# ── RegMixMatch-specific building blocks (ported from freematch_utils.py) ──────
 
 
 def rand_bbox_tao(size, tao):
@@ -195,17 +155,9 @@ def entropy_loss(mask, logits_s, p_model, label_hist):
     return (mod_p_model * torch.log(mod_mean_s + 1e-12)).sum()
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100", "svhn"])
-parser.add_argument("--widen_factor", type=int, default=2, help="WideResNet-28-{widen_factor}. Papers use 2 for CIFAR-10 and 8 for CIFAR-100.")
-parser.add_argument("--model", type=str, default="wideresnet", choices=["wideresnet", "resnet18"], help="Backbone architecture.")
-parser.add_argument("--depth", type=int, default=28, help="WideResNet depth (e.g. 28 for WRN-28-x, 40 for WRN-40-x). Ignored for resnet18. Must satisfy (depth-4) mod 6 == 0.")
-parser.add_argument("--topk", type=int, default=1, help="Also report top-k accuracy for every k from 1 to this value (e.g. --topk 3 logs Top-1, Top-2 and Top-3).")
-parser.add_argument("--weight_decay", type=float, default=5e-4, help="SGD weight decay. Papers use 5e-4 for CIFAR-10 and 1e-3 for CIFAR-100.")
-parser.add_argument("--num_labeled", type=int, default=250)
-parser.add_argument("--optimized", type=str2bool, default=True)
-parser.add_argument("--seed", type=int, default=42)
-parser.add_argument("--test_period", type=int, default=500)
+parser = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+add_common_args(parser)
 parser.add_argument("--mu", type=int, default=7, help="Unlabeled:labeled batch size ratio.")
 parser.add_argument("--tau_m", type=float, default=0.999, help="Confidence threshold defining the 'confident' pool used to build the ResizeMix supervision (separate from the adaptive consistency threshold, which has no fixed tau in this method).")
 parser.add_argument("--lambda_u", type=float, default=1.0, help="Weight of the FreeMatch consistency loss.")
@@ -218,153 +170,38 @@ parser.add_argument("--alpha_h", type=float, default=1.0, help="Beta-distributio
 parser.add_argument("--alpha_l", type=float, default=16.0, help="Beta-distribution concentration for the uncertain-sample patch box.")
 parser.add_argument("--warmup_steps", type=int, default=2048, help="Purely-supervised steps run before the main loop, used only to seed the adaptive-threshold EMA trackers. Not counted towards --max_steps.")
 parser.add_argument("--static_shapes", type=str2bool, default=False, help="Mix over the full labeled+unlabeled population every step and zero out non-confident contributions via a multiplicative weight, instead of slicing out a confidence-filtered subset (whose size changes every step). Mathematically equivalent, but keeps every model() call at a fixed shape, which is required for torch.compile(mode='reduce-overhead') to be safe here -- the default (filtered) path crashes under it on shape-varying CUDA graph replay. Automatically enables that compile mode when true.")
-parser.add_argument("--max_steps", type=int, default=2**20, help="Number of steps actually run; the run is truncated here.")
-parser.add_argument("--total_steps", type=int, default=2**20, help="Nominal horizon the cosine LR schedule decays over, independent of max_steps.")
-parser.add_argument("--lr_schedule", type=str, default="fixmatch_cosine", choices=["fixmatch_cosine", "cosine_annealing"], help="LR schedule: rescaled FixMatch cosine (default) or torch's classic CosineAnnealingLR.")
-parser.add_argument("--verbose", type=str2bool, default=False)
-parser.add_argument("--target_acc", type=float, default=None, help="Stop the run early once test_acc reaches this value.")
-parser.add_argument("--max_minutes", type=float, default=None, help="Stop the run once it has been training for this many minutes: checked at each evaluation, and counted from the first training step, so model compilation does not eat into the budget. The paper caps every run at 120 minutes; run_experiment.py passes it.")
-parser.add_argument("--tag", type=str, default="", help="Suffix appended to the result file name (e.g. 'unlimited').")
-parser.add_argument("--use_ema", type=str2bool, default=True, help="Evaluate an EMA of the weights instead of the raw training weights.")
-parser.add_argument("--ema_decay", type=float, default=0.999)
 args = parser.parse_args()
 
 
 def run_regmixmatch():
-    torch.backends.cudnn.benchmark = True
-    torch.set_float32_matmul_precision("high")
+    enable_runtime_optimizations()
+    device = select_device()
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    if args.dataset == "cifar100":
-        num_classes = 100
-        mean = torch.tensor([0.5071, 0.4865, 0.4409])
-        std = torch.tensor([0.2673, 0.2564, 0.2762])
-        train_ds = torchvision.datasets.CIFAR100(root="./data", train=True, download=True)
-        test_ds = torchvision.datasets.CIFAR100(root="./data", train=False, download=True)
-    elif args.dataset == "svhn":
-        num_classes = 10
-        mean = torch.tensor([0.4377, 0.4438, 0.4728])
-        std = torch.tensor([0.1980, 0.2010, 0.1970])
-        train_ds = torchvision.datasets.SVHN(root="./data", split="train", download=True)
-        test_ds = torchvision.datasets.SVHN(root="./data", split="test", download=True)
-    else:
-        num_classes = 10
-        mean = torch.tensor([0.4914, 0.4822, 0.4465])
-        std = torch.tensor([0.2470, 0.2435, 0.2616])
-        train_ds = torchvision.datasets.CIFAR10(root="./data", train=True, download=True)
-        test_ds = torchvision.datasets.CIFAR10(root="./data", train=False, download=True)
-
+    num_classes, mean, std, train_ds, test_ds = load_datasets(args.dataset)
     logger.info(f"Training samples: {len(train_ds)}, Test samples: {len(test_ds)}")
-    logger.info(f"Device: {device}")
-    if torch.cuda.is_available():
-        logger.info(f"GPU: {torch.cuda.get_device_name(0)}")
-    logger.info(f"Mean: {mean}, Std: {std}")
 
-    num_labeled = args.num_labeled
-    optimized = args.optimized
     torch.manual_seed(args.seed)
-    train_ds = Subset(train_ds, torch.randperm(len(train_ds)))
+    labeled_ds, unlabeled_ds = split_labeled_unlabeled(train_ds, num_classes, args.num_labeled)
+    logger.info(f"Labeled class distribution: {class_counts(labeled_ds, num_classes)}")
 
-    num_per_class = num_labeled // num_classes
-    labeled_indices = []
-    unlabeled_indices = []
-    for i in range(num_classes):
-        class_indices = [j for j, (_, label) in enumerate(train_ds) if label == i]
-        perm = torch.randperm(len(class_indices))
-        labeled_indices.extend([class_indices[j] for j in perm[:num_per_class]])
-        unlabeled_indices.extend([class_indices[j] for j in perm[num_per_class:]])
-
-    labeled_ds = Subset(train_ds, labeled_indices)
-    unlabeled_ds = Subset(train_ds, unlabeled_indices)
-
-    labeled_class_counts = torch.zeros(num_classes)
-    for _, label in labeled_ds:
-        labeled_class_counts[label] += 1
-    logger.info(f"Labeled class distribution: {labeled_class_counts}")
-
-    norm_transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(mean, std),
-    ])
-    weak_transform = v2.Compose([
-        v2.ToImage(),
-        v2.RandomHorizontalFlip(),
-        v2.RandomCrop(32, padding=4),
-        v2.ToDtype(torch.float32, scale=True),
-        v2.Normalize(mean, std),
-    ])
-    strong_transform = v2.Compose([
-        v2.RandAugment(num_ops=3, magnitude=5),
-        v2.ToImage(),
-        v2.RandomHorizontalFlip(),
-        v2.RandomCrop(32, padding=4),
-        v2.ToDtype(torch.float32, scale=True),
-        v2.Normalize(mean, std),
-    ])
-
-    labeled_ds = TransformedDataset(labeled_ds, transforms.ToTensor())
-    unlabeled_ds = TransformedDatasetWithIndex(unlabeled_ds, transform=transforms.ToTensor())
-    test_ds = TransformedDataset(test_ds, norm_transform)
-
-    num_workers = min(2, os.cpu_count())
-    dl_kwargs = dict(
-        num_workers=num_workers,
-        pin_memory=True,
-        prefetch_factor=4,
-        persistent_workers=True,
-    )
-
+    norm_transform, weak_transform, strong_transform = build_transforms(mean, std)
+    optimized = args.optimized
     batch_size_l = 64
     mu = args.mu
+    labeled_loader, unlabeled_loader, test_loader, unlabeled_ds = build_loaders(
+        labeled_ds, unlabeled_ds, test_ds, norm_transform, batch_size_l, mu, optimized)
 
-    if optimized:
-        labeled_loader = DataLoader(labeled_ds, batch_size=batch_size_l, shuffle=True, **dl_kwargs)
-        unlabeled_loader = DataLoader(unlabeled_ds, batch_size=batch_size_l * mu, shuffle=True, **dl_kwargs)
-        test_loader = DataLoader(test_ds, batch_size=256, shuffle=False, **dl_kwargs)
-    else:
-        labeled_loader = DataLoader(labeled_ds, batch_size=batch_size_l, shuffle=True)
-        unlabeled_loader = DataLoader(unlabeled_ds, batch_size=batch_size_l * mu, shuffle=True)
-        test_loader = DataLoader(test_ds, batch_size=256, shuffle=False)
-
-    model = build_model(args.model, num_classes, args.widen_factor, args.depth).to(device)
-    if optimized:
-        model = model.to(memory_format=torch.channels_last)
-
-    if args.use_ema:
-        eval_model = build_model(args.model, num_classes, args.widen_factor, args.depth).to(device)
-        if optimized:
-            eval_model = eval_model.to(memory_format=torch.channels_last)
-        ema = EMA(model, args.ema_decay)
-    else:
-        eval_model = model
-        ema = None
-
-    base_model = model
-    logger.info(f"Number of parameters: {sum(p.numel() for p in model.parameters()):,}")
+    # torch.compile(mode="reduce-overhead") uses CUDA graphs, which require every model() call to
+    # keep the same input shape. By default the confident and uncertain pool sizes feeding the
+    # second model() call change almost every step -- they depend on how many unlabeled samples
+    # clear tau_m -- which crashes under that mode (assert_size_stride mismatches in
+    # convolution_backward when a graph captured for one shape is replayed with another).
+    # --static_shapes removes that variation at the source, so compilation is enabled only with it.
+    model, base_model, eval_model, ema, optimizer, scheduler = build_model_and_optimizer(
+        args, num_classes, device, compile_model=args.static_shapes)
 
     max_steps = args.max_steps
     total_steps = args.total_steps
-    optimizer = torch.optim.SGD(
-        model.parameters(), lr=0.03, momentum=0.9, weight_decay=args.weight_decay, nesterov=True
-    )
-    scheduler = build_lr_scheduler(optimizer, total_steps, schedule=args.lr_schedule)
-
-    # torch.compile(mode="reduce-overhead") uses CUDA graphs, which require every model() call
-    # to keep the same input shape. By default the confident/uncertain pool sizes that feed the
-    # second model() call change almost every step (they depend on how many unlabeled samples
-    # clear the tau_m threshold), which crashes under that mode (assert_size_stride mismatches
-    # in convolution_backward when a graph captured for one shape gets replayed with another).
-    # --static_shapes fixes this at the source (see below), so only enable compile then.
-    if args.static_shapes and optimized and torch.cuda.is_available() and "5060 Ti" in torch.cuda.get_device_name(0):
-        try:
-            import triton
-            triton_available = True
-        except ImportError:
-            triton_available = False
-        if triton_available:
-            model = torch.compile(model, mode="reduce-overhead")
-            logger.info("torch.compile activé (mode=reduce-overhead)")
 
     static_shapes = args.static_shapes
     lambda_u = args.lambda_u
@@ -375,43 +212,20 @@ def run_regmixmatch():
     disab_cam = args.disab_cam
     alpha_h = args.alpha_h
     alpha_l = args.alpha_l
-    confident_pool_full = (num_labeled / num_classes) >= 100  # rich-label regime: mix confident pool + labeled data
+    confident_pool_full = (args.num_labeled / num_classes) >= 100  # rich-label regime: mix confident pool + labeled data
 
     method_name = "regmixmatch" + ("_noclamp" if not args.svhn_clamp else "") + (f"_mu{args.mu}" if args.mu != 7 else "") + ("_ema" if args.use_ema else "") + (f"_wf{args.widen_factor}" if args.widen_factor != 2 else "") + (f"_{args.tag}" if args.tag else "")
-    dataset_prefix = f"{args.dataset}-"
-    name_of_experiment = f"{dataset_prefix}labeled-{num_labeled}-seed-{args.seed}"
 
-    metrics = {
-        "step": [],
-        "train_loss": [],
-        "test_f1": [],
-        "test_acc": [],
-        "time_elapsed": [],
-        "pl_quality": [],
-        "mask_ratio": [],
-        "corrections": [],
-        "new_errors": [],
-        "error_reinforcement": [],
-        "correct_reinforcement": [],
-        "new_label": [],
-        "new_correct": [],
-        "bad_corrections": [],
-        "topk_acc": [],
-    }
+    path = results_path(args, method_name)
 
-    last_pseudo_labels = torch.full((len(unlabeled_ds),), -1, dtype=torch.long)
-    last_confidences = torch.zeros(len(unlabeled_ds), dtype=torch.float32)
-    true_labels = torch.tensor([label for _, label, _ in unlabeled_ds])
+    metrics = new_metrics()
     pseudo_labels = torch.full((len(unlabeled_ds),), -1, dtype=torch.long)
     confidences = torch.zeros(len(unlabeled_ds), dtype=torch.float32)
+    pseudo_state = (pseudo_labels, confidences, pseudo_labels.clone(), confidences.clone(),
+                    torch.tensor([label for _, label, _ in unlabeled_ds]))
 
     test_period = args.test_period
     verbose = args.verbose
-    target_acc = args.target_acc
-
-    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    results_dir = os.path.join(repo_root, "results", name_of_experiment)
-    os.makedirs(results_dir, exist_ok=True)
 
     use_cuda_autocast = optimized and device.type == "cuda"
     labeled_iter = iter(labeled_loader)
@@ -616,44 +430,10 @@ def run_regmixmatch():
         if (step + 1) % test_period == 0 or step == 0 or step == max_steps - 1:
             if ema is not None:
                 ema.copy_to(eval_model)
-            f1, acc, topk_accs = evaluate_f1_and_accuracy(eval_model, test_loader, device, args.topk)
-            metrics["step"].append(step + 1)
-            metrics["test_f1"].append(f1)
-            metrics["test_acc"].append(acc)
-            metrics["time_elapsed"].append(time.time() - start_time)
-            metrics["mask_ratio"].append(float(np.mean(mask_ratio)) if mask_ratio else 0.0)
-            metrics["train_loss"].append(float(np.mean(losses)) if losses else 0.0)
-            metrics["topk_acc"].append(topk_accs)
-            mask_ratio = []
-            losses = []
-
-            pl_metrics = compute_pseudo_label_metrics(
-                pseudo_labels, confidences, last_pseudo_labels, last_confidences, true_labels
-            )
-            for key, value in pl_metrics.items():
-                metrics[key].append(value)
-            last_pseudo_labels = pseudo_labels.clone()
-            last_confidences = confidences.clone()
-
-            with open(f"{results_dir}/{method_name}_metrics.json", "w") as f:
-                json.dump(metrics, f, indent=4)
-
-            if verbose:
-                print()
-            topk_str = " ".join(f"Top-{k}: {v:.4f}," for k, v in enumerate(topk_accs, start=1)) if args.topk > 1 else ""
-            logger.info(
-                f"Test F1: {f1:.4f}, Acc: {acc:.4f}, {topk_str} PL Quality: {pl_metrics['pl_quality']:.4f}, "
-                f"Mask Ratio: {metrics['mask_ratio'][-1]:.4f}, Error Reinforcement: {pl_metrics['error_reinforcement']}, Correct Reinforcement: {pl_metrics['correct_reinforcement']}, "
-                f"Corrections: {pl_metrics['corrections']}, Bad Corrections: {pl_metrics['bad_corrections']}, New Errors: {pl_metrics['new_errors']}, New Correct: {pl_metrics['new_correct']}, Loss: {metrics['train_loss'][-1]:.4f}, "
-                f"Time: {metrics['time_elapsed'][-1]:.2f}s"
-            )
-
-            if target_acc is not None and acc >= target_acc:
-                logger.info(f"Reached target_acc={target_acc:.4f} at step {step + 1} (acc={acc:.4f}) — stopping early.")
-                break
-
-            if args.max_minutes is not None and metrics["time_elapsed"][-1] >= args.max_minutes * 60:
-                logger.info(f"Reached the {args.max_minutes:.0f}-minute budget at step {step + 1} (acc={acc:.4f}) -- stopping.")
+            stop = evaluate_and_log(args, step, metrics, path, eval_model, test_loader, device,
+                                    start_time, losses, mask_ratio, pseudo_state)
+            losses, mask_ratio = [], []
+            if stop:
                 break
         elif verbose:
             print(

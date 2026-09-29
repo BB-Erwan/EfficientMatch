@@ -70,10 +70,13 @@ def track_pseudo_labels(pseudo_labels, confidences, indices, mask, pseudo, max_p
 
 
 def evaluate_and_log(args, step, metrics, path, eval_model, test_loader, device, start_time,
-                     losses, mask_ratios, pseudo_state):
+                     losses, mask_ratios, pseudo_state, extra=None):
     """Evaluate, append one entry to every metric, rewrite the JSON file, log a summary line, and
     return True if the run should stop -- because it reached --target_acc or ran out of
     --max_minutes.
+
+    `extra` adds one entry to metrics keys a method records beyond the shared set -- Fast FixMatch's
+    per-step batch size and cumulative FLOPs are the only case.
 
     `pseudo_state` is the mutable 4-tuple (pseudo_labels, confidences, last_pseudo_labels,
     last_confidences, true_labels) carried by the training loop; the two "last" tensors are
@@ -96,6 +99,8 @@ def evaluate_and_log(args, step, metrics, path, eval_model, test_loader, device,
     pl = compute_pseudo_label_metrics(pseudo_labels, confidences, last_pseudo_labels,
                                       last_confidences, true_labels)
     for key, value in pl.items():
+        metrics[key].append(value)
+    for key, value in (extra or {}).items():
         metrics[key].append(value)
     last_pseudo_labels.copy_(pseudo_labels)
     last_confidences.copy_(confidences)

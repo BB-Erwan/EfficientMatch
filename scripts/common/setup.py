@@ -30,7 +30,7 @@ def enable_runtime_optimizations():
     torch.set_float32_matmul_precision("high")
 
 
-def build_model_and_optimizer(args, num_classes, device):
+def build_model_and_optimizer(args, num_classes, device, compile_model=True):
     """Returns (model, base_model, eval_model, ema, optimizer, scheduler).
 
     `model` is what the training loop calls, possibly wrapped by torch.compile. `base_model` is the
@@ -63,7 +63,8 @@ def build_model_and_optimizer(args, num_classes, device):
 
     # Compilation is worth its one-off cost only for fixed tensor shapes; Fast FixMatch, whose batch
     # size changes every iteration, is the counter-example measured in docs/fast_fixmatch.md.
-    if args.optimized and torch.cuda.is_available() and "5060" in torch.cuda.get_device_name(0):
+    # RegMixMatch passes compile_model=False unless --static_shapes makes its own shapes fixed.
+    if compile_model and args.optimized and torch.cuda.is_available() and "5060" in torch.cuda.get_device_name(0):
         try:
             import triton  # noqa: F401
             model = torch.compile(model, mode="reduce-overhead")

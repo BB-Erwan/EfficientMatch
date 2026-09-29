@@ -56,6 +56,12 @@ parser.add_argument("--mixup_weight", type=float, default=1.0,
 parser.add_argument("--alpha", type=float, default=0.75,
                     help="Beta concentration for the mixing coefficient, drawn then folded to lambda >= 0.5 "
                          "so the anchor sample always dominates its partner.")
+parser.add_argument("--mixing_target", type=str, default="semi_soft", choices=["hard", "semi_soft", "soft"],
+                    help="What label the Mixup channel is trained against (Appendix A.3, Table 8). "
+                         "'semi_soft', the default, mixes the two one-hot labels; 'hard' collapses that "
+                         "mixture back to a single class, treating the mixed sample as a plain augmentation; "
+                         "'soft' mixes with the partner's full softmax distribution, a noisier target. "
+                         "Results are written as efficientmatch_hard_* and efficientmatch_soft_*.")
 parser.add_argument("--T", type=float, default=0.5, help="Sharpening temperature (unused at the defaults).")
 parser.add_argument("--adaptive_threshold", type=str2bool, default=False,
                     help="Replace the fixed tau with FlexMatch's per-class curriculum thresholding.")
@@ -99,7 +105,9 @@ def run_efficientmatch():
 
     if args.adaptive_threshold and args.freematch_threshold:
         raise ValueError("--adaptive_threshold (FlexMatch) and --freematch_threshold are mutually exclusive.")
-    method_name = (("efficientmatch_freematch" if args.freematch_threshold else "efficientmatch")
+    variant = {"hard": "efficientmatch_hard", "soft": "efficientmatch_soft"}.get(args.mixing_target,
+                                                                                "efficientmatch")
+    method_name = (("efficientmatch_freematch" if args.freematch_threshold else variant)
                    + ("_noclamp" if args.freematch_threshold and not args.freematch_svhn_clamp else "")
                    + ("_flex" if args.adaptive_threshold else "")
                    + ("_ema" if args.use_ema else "")
@@ -222,11 +230,18 @@ def run_efficientmatch():
 
             mixup_x = torch.lerp(all_inputs[:n_l], x_l, lam_x.view(-1, 1, 1, 1))
             mixup_u = torch.lerp(all_inputs[n_l:], x_u_w, lam_u.view(-1, 1, 1, 1))
+            # The unlabeled anchor's own target is its one-hot pseudo-label, or its full softmax
+            # distribution for the noisier "soft" variant of Appendix A.3.
+            anchor_u = probs_u_w if args.mixing_target == "soft" else one_hot_u
             mixup_targets_x = torch.lerp(all_targets[:n_l], one_hot_l, lam_x.view(-1, 1))
-            mixup_targets_u = torch.lerp(all_targets[n_l:], one_hot_u, lam_u.view(-1, 1))
+            mixup_targets_u = torch.lerp(all_targets[n_l:], anchor_u, lam_u.view(-1, 1))
 
             mixup_logits = model(torch.cat([mixup_x, mixup_u], dim=0))
             mixup_targets = torch.cat([mixup_targets_x, mixup_targets_u], dim=0)
+            # "hard" collapses the mixed target back to one class, which -- since lambda >= 0.5 --
+            # is always the anchor's, turning the mix into a plain augmentation.
+            if args.mixing_target == "hard":
+                mixup_targets = mixup_targets.argmax(dim=1)
 
             # all_masks is the *partner's* mask after the shuffle: a mixed sample counts only if the
             # sample it was mixed with was confident enough.

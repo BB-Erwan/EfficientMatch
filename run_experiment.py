@@ -94,11 +94,13 @@ def build_experiments():
             runs.append(run("lambda-mix", "Table 7", "cifar10-250", "efficientmatch", seed,
                             extra=["--mixup_weight", weight], post=f"_mixw{weight}"))
 
-    # Table 8 -- what label the Mixup channel is trained against. Semi-soft is the default.
-    for script in ("efficientmatch_hard", "efficientmatch_soft"):
+    # Table 8 -- what label the Mixup channel is trained against. Semi-soft is the default and is
+    # already covered by "main"; the other two are the same script under --mixing_target.
+    for target in ("hard", "soft"):
         for config in ("cifar10-250", "svhn-250"):
             for seed in SEEDS:
-                runs.append(run("mixing-target", "Table 8", config, script, seed))
+                runs.append(run("mixing-target", "Table 8", config, "efficientmatch", seed,
+                                extra=["--mixing_target", target], pre=f"_{target}"))
 
     # Table 10 -- FixMatch and RegMixMatch brought down to EfficientMatch's mu=3.
     for seed in SEEDS:
@@ -157,6 +159,9 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="Print the commands instead of running them.")
     ap.add_argument("--list", action="store_true", help="List the experiments and how complete each is.")
     ap.add_argument("--check", action="store_true", help="Report which paper runs have no result file.")
+    ap.add_argument("--commands", action="store_true",
+                    help="Print every selected run as a plain command line, grouped by experiment, so the "
+                         "sweep can be pasted into a shell or a scheduler instead of driven from here.")
     args = ap.parse_args()
 
     if args.list:
@@ -170,6 +175,18 @@ def main():
         return
 
     todo = selected(args, runs)
+    if args.commands:
+        current = None
+        for entry in todo:
+            if entry["experiment"] != current:
+                current = entry["experiment"]
+                print(f"\n# {current} -- {entry['paper']}")
+            # Relative to the repository root, and with the interpreter left to the caller.
+            cmd = command(entry)[1:]
+            cmd[0] = os.path.relpath(cmd[0], REPO_ROOT).replace(os.sep, "/")
+            print("python " + " ".join(cmd))
+        return
+
     if args.check:
         missing = [e for e in todo if not os.path.exists(e["file"])]
         for e in missing:
