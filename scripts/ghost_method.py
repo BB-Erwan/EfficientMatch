@@ -157,7 +157,7 @@ def run_ghost():
 
     # torch.compile is activated for parity with the real scripts even though the ghost loop
     # never calls model() -- it costs nothing here since the wrapped model is simply unused.
-    if optimized and torch.cuda.is_available() and "5060 Ti" in torch.cuda.get_device_name(0):
+    if optimized and torch.cuda.is_available():
         try:
             import triton  # noqa: F401
             model = torch.compile(model, mode="reduce-overhead")

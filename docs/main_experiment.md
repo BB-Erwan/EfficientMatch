@@ -162,7 +162,7 @@ python run_experiment.py --experiment freematch-noclamp
 
 ## A caveat on the wall-clock numbers
 
-Step counts and FLOPs are deterministic. Wall-clock time is not: while checking the per-step time of
+Step counts and FLOPs do not depend on how fast the machine runs. Wall-clock time does: while checking the per-step time of
 every run, the machine was found to have occasionally run 20% to 200% slower than usual, with no
 concurrent job recorded and no cause identified. Runs affected by this were replayed, and two of
 them are the numbers reported above:

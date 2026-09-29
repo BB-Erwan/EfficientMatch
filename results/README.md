@@ -63,7 +63,13 @@ same scripts, but `run_experiment.py` does not list them: it only covers what th
 time, which subtracts the measured cost of those evaluations (553.7 ms per pass for WRN-28-2,
 1499.1 ms for WRN-28-4); `python scripts/run_analysis.py compare` prints both.
 
-Wall-clock time is the one metric here that is not reproducible: the same run repeated on the same
+Wall-clock time is the metric most exposed to the machine: the same run repeated on the same
 machine has occasionally been 20% to 200% slower, without any concurrent job. Step counts and FLOPs
-are deterministic and unaffected. Runs whose timing was visibly inflated were replayed, and the ones
-that were not are flagged in `docs/`.
+do not depend on how fast the machine runs, and are unaffected. Runs whose timing was visibly
+inflated were replayed, and the ones that were not are flagged in `docs/`.
+
+No run is bit-reproducible either. The seed fixes the labeled/unlabeled split and the first training
+step exactly, but bfloat16 autocast, TF32 matrix products and cuDNN's choice of convolution
+algorithm make two runs of the same command drift apart from the second step on. Repeating a run
+therefore gives a slightly different curve and a slightly different step count at the target, not
+the identical file.
