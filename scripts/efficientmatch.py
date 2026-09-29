@@ -1,301 +1,134 @@
+"""EfficientMatch -- the method of the paper (section 3).
+
+FixMatch's supervised and consistency losses, plus a third term: a Mixup channel filtered by the
+confidence mask the consistency loss has already computed. Nothing new is thresholded.
+
+At each iteration, with a labeled batch X and two views of an unlabeled batch, weak U_w and strong U_s:
+
+  L_s    cross-entropy on the labeled batch
+  L_u    cross-entropy between the pseudo-label of U_w and the prediction on U_s, masked by
+         confidence >= tau
+  L_mix  every sample of X + U_w is mixed with a shuffled partner from the same pool, and the
+         mixed sample contributes only if its *partner* passed the mask
+
+  L = L_s + L_u + lambda_mix * L_mix
+
+The whole contribution is `loss_mixup` below. Filtering after mixing rather than before it is what
+separates this from a naive combination of MixMatch and FixMatch: the signal injected into L_mix is
+never built from a partner the model deems unreliable.
+
+Two thresholding variants of the paper are reachable from here: --adaptive_threshold for
+FlexMatch's per-class curriculum, and --freematch_threshold for FreeMatch's self-adaptive rule
+(Table 4). Both replace the fixed tau; neither is the default.
+
+    python efficientmatch.py --dataset cifar10 --num_labeled 250 --seed 2312 --target_acc 0.80
+"""
 import argparse
-import json
 import logging
 import os
 import sys
 import time
 from contextlib import nullcontext
 
-import numpy as np
 import torch
 import torch.nn.functional as F
-import torchvision
-import torchvision.transforms as transforms
 from torch.amp import autocast
-from torch.utils.data import DataLoader, Subset
-from torchvision.transforms import v2
 
-sys.path.append("..")  # add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from datasets_utils import TransformedDataset, TransformedDatasetWithIndex
-from models import WideResNet, build_model
-from utils import evaluate_f1_and_accuracy, build_lr_scheduler
-from ema import EMA
+from common.args import add_common_args, str2bool
+from common.data import build_loaders, build_transforms, class_counts, load_datasets, split_labeled_unlabeled
+from common.recording import evaluate_and_log, new_metrics, results_path, track_pseudo_labels
+from common.setup import build_model_and_optimizer, enable_runtime_optimizations, select_device
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-
-def compute_pseudo_label_metrics(pseudo_labels, confidences, last_pseudo_labels, last_confidences, true_labels):
-    """Track how pseudo-labels evolve between two evaluations: new labels assigned,
-    corrections (wrong -> right) vs bad corrections (right -> wrong), and whether
-    confidence increases reinforce correct or incorrect labels."""
-    new_label = (pseudo_labels != last_pseudo_labels) & (last_pseudo_labels == -1)
-    existing_label_changes = (pseudo_labels != last_pseudo_labels) & (last_pseudo_labels != -1)
-    was_good_pseudo = last_pseudo_labels == true_labels
-    is_good_pseudo = pseudo_labels == true_labels
-    confidence_increased = confidences > last_confidences
-
-    return {
-        "pl_quality": is_good_pseudo.sum().item() / len(true_labels),
-        "corrections": (existing_label_changes & ~was_good_pseudo & is_good_pseudo).sum().item(),
-        "bad_corrections": (existing_label_changes & was_good_pseudo & ~is_good_pseudo).sum().item(),
-        "new_label": new_label.sum().item(),
-        "new_errors": (new_label & ~is_good_pseudo).sum().item(),
-        "new_correct": (new_label & is_good_pseudo).sum().item(),
-        "correct_reinforcement": (confidence_increased & is_good_pseudo & was_good_pseudo & ~new_label).sum().item(),
-        "error_reinforcement": (confidence_increased & ~is_good_pseudo & ~was_good_pseudo & ~new_label).sum().item(),
-    }
-
-
-def str2bool(v):
-    if isinstance(v, bool):
-        return v
-    if v.lower() in ("yes", "true", "t", "1", "y"):
-        return True
-    if v.lower() in ("no", "false", "f", "0", "n"):
-        return False
-    raise argparse.ArgumentTypeError("Boolean value expected.")
-
-
-parser = argparse.ArgumentParser()
-parser.add_argument("--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100", "svhn"])
-parser.add_argument("--widen_factor", type=int, default=2, help="WideResNet-28-{widen_factor}. Papers use 2 for CIFAR-10 and 8 for CIFAR-100.")
-parser.add_argument("--model", type=str, default="wideresnet", choices=["wideresnet", "resnet18"], help="Backbone architecture.")
-parser.add_argument("--depth", type=int, default=28, help="WideResNet depth (e.g. 28 for WRN-28-x, 40 for WRN-40-x). Ignored for resnet18. Must satisfy (depth-4) mod 6 == 0.")
-parser.add_argument("--topk", type=int, default=1, help="Also report top-k accuracy for every k from 1 to this value (e.g. --topk 3 logs Top-1, Top-2 and Top-3).")
-parser.add_argument("--weight_decay", type=float, default=5e-4, help="SGD weight decay. Papers use 5e-4 for CIFAR-10 and 1e-3 for CIFAR-100.")
-parser.add_argument("--num_labeled", type=int, default=250)
-parser.add_argument("--optimized", type=str2bool, default=True)
-parser.add_argument("--seed", type=int, default=42)
-parser.add_argument("--test_period", type=int, default=500)
-parser.add_argument("--tau", type=float, default=0.95)
-parser.add_argument("--adaptive_threshold", type=str2bool, default=False, help="Use FlexMatch-style class-adaptive confidence thresholding (Curriculum Pseudo Labeling) instead of a fixed tau.")
-parser.add_argument("--freematch_threshold", type=str2bool, default=False, help="Use FreeMatch's self-adaptive thresholding (as in regmixmatch.py) instead of a fixed tau: threshold = time_p * p_model[pseudo]/max(p_model), with time_p / p_model EMA-tracked (momentum 0.999) from the weak-view predictions and initialized uniformly at 1/num_classes (FreeMatch's standard init -- regmixmatch.py instead seeds them with a supervised warmup, not reproduced here to keep the training budget unchanged). Clamped to [0.9, 0.95] on SVHN, like regmixmatch.py. Results are saved as efficientmatch_freematch_*. Mutually exclusive with --adaptive_threshold.")
-parser.add_argument("--tag", type=str, default="", help="Optional suffix appended to the result file name (e.g. 'unlimited'), to keep special runs from being confused with the standard ones.")
-parser.add_argument("--freematch_svhn_clamp", type=str2bool, default=True, help="Only used with --freematch_threshold: clamp the adaptive threshold to [0.9, 0.95] on SVHN, as the reference FreeMatch/RegMixMatch code does. Set to false to use the raw adaptive threshold on SVHN too (results are then saved as efficientmatch_freematch_noclamp_*).")
-parser.add_argument("--mu", type=int, default=3, help="Unlabeled:labeled batch size ratio.")
-parser.add_argument("--mixup_weight", type=float, default=1.0, help="Weight applied to the Mixup loss term.")
-parser.add_argument("--thresh_warmup", type=str2bool, default=True, help="Only used when --adaptive_threshold is enabled: include still-unassigned samples in the per-class normalization during warmup.")
-parser.add_argument("--alpha", type=float, default=0.75)
-parser.add_argument("--T", type=float, default=0.5)
-parser.add_argument("--max_steps", type=int, default=2**20, help="Number of steps actually run; the run is truncated here.")
-parser.add_argument("--total_steps", type=int, default=2**20, help="Nominal horizon the cosine LR schedule decays over, independent of max_steps.")
-parser.add_argument("--lr_schedule", type=str, default="fixmatch_cosine", choices=["fixmatch_cosine", "cosine_annealing"], help="LR schedule: rescaled FixMatch cosine (default) or torch's classic CosineAnnealingLR.")
-parser.add_argument("--verbose", type=str2bool, default=False)
-parser.add_argument("--target_acc", type=float, default=None, help="Stop the run early once test_acc reaches this value.")
-parser.add_argument("--max_minutes", type=float, default=None, help="Stop the run once it has been training for this many minutes: checked at each evaluation, and counted from the first training step, so model compilation does not eat into the budget. The paper caps every run at 120 minutes; run_experiment.py passes it.")
-parser.add_argument("--use_ema", type=str2bool, default=True, help="Evaluate an EMA of the weights instead of the raw training weights.")
-parser.add_argument("--ema_decay", type=float, default=0.999)
+parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+add_common_args(parser)
+parser.add_argument("--mu", type=int, default=3,
+                    help="Unlabeled:labeled batch size ratio. 3 is EfficientMatch's default, chosen in "
+                         "Appendix A.1 as the value minimising total FLOPs among those that converge reliably.")
+parser.add_argument("--tau", type=float, default=0.95,
+                    help="Confidence threshold. The same mask gates the consistency loss and the Mixup channel.")
+parser.add_argument("--mixup_weight", type=float, default=1.0,
+                    help="lambda_mix, the weight of the Mixup loss (Appendix A.2, Table 7).")
+parser.add_argument("--alpha", type=float, default=0.75,
+                    help="Beta concentration for the mixing coefficient, drawn then folded to lambda >= 0.5 "
+                         "so the anchor sample always dominates its partner.")
+parser.add_argument("--T", type=float, default=0.5, help="Sharpening temperature (unused at the defaults).")
+parser.add_argument("--adaptive_threshold", type=str2bool, default=False,
+                    help="Replace the fixed tau with FlexMatch's per-class curriculum thresholding.")
+parser.add_argument("--thresh_warmup", type=str2bool, default=True,
+                    help="Only with --adaptive_threshold: count still-unassigned samples in the per-class "
+                         "normalisation during warmup.")
+parser.add_argument("--freematch_threshold", type=str2bool, default=False,
+                    help="Replace the fixed tau with FreeMatch's self-adaptive threshold, as RegMixMatch "
+                         "implements it: threshold = time_p * p_model[class] / max(p_model), with time_p and "
+                         "p_model tracked by EMA (0.999) over the weak-view predictions and initialised "
+                         "uniformly at 1/num_classes. This is the variant of Table 4; results are written as "
+                         "efficientmatch_freematch_*. Mutually exclusive with --adaptive_threshold.")
+parser.add_argument("--freematch_svhn_clamp", type=str2bool, default=True,
+                    help="Only with --freematch_threshold: clamp the adaptive threshold to [0.9, 0.95] on "
+                         "SVHN, as the reference FreeMatch and RegMixMatch code does. Without it the variant "
+                         "never converges on SVHN (Appendix A.5); results are then written as "
+                         "efficientmatch_freematch_noclamp_*.")
 args = parser.parse_args()
 
 
 def run_efficientmatch():
-    # ── Optimisations globales ──────────────────────────────────────────────────
-    torch.backends.cudnn.benchmark = True
-    torch.set_float32_matmul_precision("high")
-    # ───────────────────────────────────────────────────────────────────────────
+    enable_runtime_optimizations()
+    device = select_device()
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    if args.dataset == "cifar100":
-        num_classes = 100
-        mean = torch.tensor([0.5071, 0.4865, 0.4409])
-        std = torch.tensor([0.2673, 0.2564, 0.2762])
-        train_ds = torchvision.datasets.CIFAR100(root="./data", train=True, download=True)
-        test_ds = torchvision.datasets.CIFAR100(root="./data", train=False, download=True)
-    elif args.dataset == "svhn":
-        num_classes = 10
-        mean = torch.tensor([0.4377, 0.4438, 0.4728])
-        std = torch.tensor([0.1980, 0.2010, 0.1970])
-        train_ds = torchvision.datasets.SVHN(root="./data", split="train", download=True)
-        test_ds = torchvision.datasets.SVHN(root="./data", split="test", download=True)
-    else:
-        num_classes = 10
-        mean = torch.tensor([0.4914, 0.4822, 0.4465])
-        std = torch.tensor([0.2470, 0.2435, 0.2616])
-        train_ds = torchvision.datasets.CIFAR10(root="./data", train=True, download=True)
-        test_ds = torchvision.datasets.CIFAR10(root="./data", train=False, download=True)
-
+    num_classes, mean, std, train_ds, test_ds = load_datasets(args.dataset)
     logger.info(f"Training samples: {len(train_ds)}, Test samples: {len(test_ds)}")
-    logger.info(f"Device: {device}")
-    if torch.cuda.is_available():
-        logger.info(f"GPU: {torch.cuda.get_device_name(0)}")
 
-    logger.info(f"Mean: {mean}, Std: {std}")
-
-    num_labeled = args.num_labeled
-    optimized = args.optimized
+    # Seed once, here: the split below and the weight initialisation further down both draw from
+    # this point, and their order is what makes a seed reproduce a run.
     torch.manual_seed(args.seed)
+    labeled_ds, unlabeled_ds = split_labeled_unlabeled(train_ds, num_classes, args.num_labeled)
+    logger.info(f"Labeled class distribution: {class_counts(labeled_ds, num_classes)}")
 
-    train_ds = Subset(train_ds, torch.randperm(len(train_ds)))
-
-    num_per_class = num_labeled // num_classes
-    labeled_indices = []
-    unlabeled_indices = []
-
-    for i in range(num_classes):
-        class_indices = [j for j, (_, label) in enumerate(train_ds) if label == i]
-        perm = torch.randperm(len(class_indices))
-        labeled_indices.extend([class_indices[j] for j in perm[:num_per_class]])
-        unlabeled_indices.extend([class_indices[j] for j in perm[num_per_class:]])
-
-    labeled_ds = Subset(train_ds, labeled_indices)
-    unlabeled_ds = Subset(train_ds, unlabeled_indices)
-
-    labeled_class_counts = torch.zeros(num_classes)
-    for _, label in labeled_ds:
-        labeled_class_counts[label] += 1
-    logger.info(f"Labeled class distribution: {labeled_class_counts}")
-
-    norm_transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(mean, std),
-    ])
-
-    weak_transform = v2.Compose([
-        v2.ToImage(),
-        v2.RandomHorizontalFlip(),
-        v2.RandomCrop(32, padding=4),
-        v2.ToDtype(torch.float32, scale=True),
-        v2.Normalize(mean, std),
-    ])
-
-    strong_transform = v2.Compose([
-        v2.RandAugment(num_ops=3, magnitude=5),
-        v2.ToImage(),
-        v2.RandomHorizontalFlip(),
-        v2.RandomCrop(32, padding=4),
-        v2.ToDtype(torch.float32, scale=True),
-        v2.Normalize(mean, std),
-    ])
-
-    labeled_ds = TransformedDataset(labeled_ds, transforms.ToTensor())
-    unlabeled_ds = TransformedDatasetWithIndex(unlabeled_ds, transform=transforms.ToTensor())
-    test_ds = TransformedDataset(test_ds, norm_transform)
-
-    num_workers = min(2, os.cpu_count())
-    dl_kwargs = dict(
-        num_workers=num_workers,
-        pin_memory=True,
-        prefetch_factor=4,
-        persistent_workers=True,
-    )
-
+    norm_transform, weak_transform, strong_transform = build_transforms(mean, std)
     batch_size_l = 64
-    mu = args.mu
+    labeled_loader, unlabeled_loader, test_loader, unlabeled_ds = build_loaders(
+        labeled_ds, unlabeled_ds, test_ds, norm_transform, batch_size_l, args.mu, args.optimized)
 
-    if optimized:
-        labeled_loader = DataLoader(labeled_ds, batch_size=batch_size_l, shuffle=True, **dl_kwargs)
-        unlabeled_loader = DataLoader(unlabeled_ds, batch_size=batch_size_l * mu, shuffle=True, **dl_kwargs)
-        test_loader = DataLoader(test_ds, batch_size=256, shuffle=False, **dl_kwargs)
-    else:
-        labeled_loader = DataLoader(labeled_ds, batch_size=batch_size_l, shuffle=True)
-        unlabeled_loader = DataLoader(unlabeled_ds, batch_size=batch_size_l * mu, shuffle=True)
-        test_loader = DataLoader(test_ds, batch_size=256, shuffle=False)
+    model, base_model, eval_model, ema, optimizer, scheduler = build_model_and_optimizer(
+        args, num_classes, device)
 
-    model = build_model(args.model, num_classes, args.widen_factor, args.depth)
-    model = model.to(device)
-    if optimized:
-        model = model.to(memory_format=torch.channels_last)
-
-    # --- EMA débrayable (use_ema=False -> évalue directement les poids en cours d'entraînement) ---
-    if args.use_ema:
-        eval_model = build_model(args.model, num_classes, args.widen_factor, args.depth).to(device)
-        if optimized:
-            eval_model = eval_model.to(memory_format=torch.channels_last)
-        ema = EMA(model, args.ema_decay)
-    else:
-        eval_model = model
-        ema = None
-
-    # torch.compile() below wraps model in a module whose state_dict() keys are prefixed
-    # (e.g. "_orig_mod.conv1.weight"), which would break EMA's key lookup -- keep a
-    # reference to the uncompiled module (same underlying parameters) for EMA updates.
-    base_model = model
-
-    logger.info(f"Number of parameters: {sum(p.numel() for p in model.parameters()):,}")
-
-    max_steps = args.max_steps
-    total_steps = args.total_steps
-    optimizer = torch.optim.SGD(
-        model.parameters(), lr=0.03, momentum=0.9, weight_decay=args.weight_decay, nesterov=True
-    )
-    scheduler = build_lr_scheduler(optimizer, total_steps, schedule=args.lr_schedule)
-
-    if optimized and torch.cuda.is_available() and "5060" in torch.cuda.get_device_name(0):
-        try:
-            import triton  # noqa: F401
-
-            model = torch.compile(model, mode="reduce-overhead")
-            logger.info("torch.compile active (mode=reduce-overhead)")
-        except ImportError:
-            pass
-
-    adaptive_threshold = args.adaptive_threshold
-    freematch_threshold = args.freematch_threshold
-    if adaptive_threshold and freematch_threshold:
+    if args.adaptive_threshold and args.freematch_threshold:
         raise ValueError("--adaptive_threshold (FlexMatch) and --freematch_threshold are mutually exclusive.")
-    thresh_warmup = args.thresh_warmup
-    method_name = ("efficientmatch_freematch" if freematch_threshold else "efficientmatch") + ("_noclamp" if freematch_threshold and not args.freematch_svhn_clamp else "") + ("_flex" if adaptive_threshold else "") + ("_ema" if args.use_ema else "") + (f"_mu{mu}" if mu != 3 else "") + (f"_mixw{args.mixup_weight}" if args.mixup_weight != 1.0 else "") + (f"_wf{args.widen_factor}" if args.widen_factor != 2 else "") + (f"_{args.tag}" if args.tag else "")
-    dataset_prefix = f"{args.dataset}-"
-    name_of_experiment = f"{dataset_prefix}labeled-{num_labeled}-seed-{args.seed}"
+    method_name = (("efficientmatch_freematch" if args.freematch_threshold else "efficientmatch")
+                   + ("_noclamp" if args.freematch_threshold and not args.freematch_svhn_clamp else "")
+                   + ("_flex" if args.adaptive_threshold else "")
+                   + ("_ema" if args.use_ema else "")
+                   + (f"_mu{args.mu}" if args.mu != 3 else "")
+                   + (f"_mixw{args.mixup_weight}" if args.mixup_weight != 1.0 else "")
+                   + (f"_wf{args.widen_factor}" if args.widen_factor != 2 else "")
+                   + (f"_{args.tag}" if args.tag else ""))
+    path = results_path(args, method_name)
 
-    tau = args.tau
-    alpha = args.alpha
-    beta_dist = torch.distributions.Beta(
-        torch.tensor(alpha, device=device, dtype=torch.float32),
-        torch.tensor(alpha, device=device, dtype=torch.float32),
-    )
+    beta_dist = torch.distributions.Beta(torch.tensor(args.alpha, device=device, dtype=torch.float32),
+                                         torch.tensor(args.alpha, device=device, dtype=torch.float32))
 
-    # --- Seuillage adaptatif débrayable (Curriculum Pseudo-Labeling, FlexMatch) ---
+    # State of the two optional thresholding rules. Unused at the defaults.
     selected_label = torch.full((len(unlabeled_ds),), -1, dtype=torch.long, device=device)
     classwise_acc = torch.zeros(num_classes, dtype=torch.float32, device=device)
-
-    # --- Seuillage adaptatif débrayable (FreeMatch, tel que dans regmixmatch.py) ---
     time_p = torch.tensor(1.0 / num_classes, device=device)
     p_model = torch.full((num_classes,), 1.0 / num_classes, device=device)
 
-    metrics = {
-        "step": [],
-        "train_loss": [],
-        "test_f1": [],
-        "test_acc": [],
-        "time_elapsed": [],
-        "pl_quality": [],
-        "mask_ratio": [],
-        "corrections": [],
-        "new_errors": [],
-        "error_reinforcement": [],
-        "correct_reinforcement": [],
-        "new_label": [],
-        "new_correct": [],
-        "bad_corrections": [],
-        "topk_acc": [],
-    }
-
-    last_pseudo_labels = torch.full((len(unlabeled_ds),), -1, dtype=torch.long)
-    last_confidences = torch.zeros(len(unlabeled_ds), dtype=torch.float32)
-
-    true_labels = torch.tensor([label for _, label, _ in unlabeled_ds])
+    metrics = new_metrics()
     pseudo_labels = torch.full((len(unlabeled_ds),), -1, dtype=torch.long)
     confidences = torch.zeros(len(unlabeled_ds), dtype=torch.float32)
+    pseudo_state = (pseudo_labels, confidences, pseudo_labels.clone(), confidences.clone(),
+                    torch.tensor([label for _, label, _ in unlabeled_ds]))
 
-    test_period = args.test_period
-    verbose = args.verbose
-    target_acc = args.target_acc
-
-    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    results_dir = os.path.join(repo_root, "results", name_of_experiment)
-    os.makedirs(results_dir, exist_ok=True)
+    losses, mask_ratios = [], []
     start_time = time.time()
-    mask_ratio = []
-    losses = []
+    labeled_iter, unlabeled_iter = iter(labeled_loader), iter(unlabeled_loader)
 
-    labeled_iter = iter(labeled_loader)
-    unlabeled_iter = iter(unlabeled_loader)
-
-    for step in range(max_steps):
+    for step in range(args.max_steps):
         model.train()
 
         try:
@@ -303,189 +136,128 @@ def run_efficientmatch():
         except StopIteration:
             labeled_iter = iter(labeled_loader)
             x_l, y_l = next(labeled_iter)
-
         try:
             x_u, y_u, idx = next(unlabeled_iter)
         except StopIteration:
             unlabeled_iter = iter(unlabeled_loader)
             x_u, y_u, idx = next(unlabeled_iter)
 
-        if optimized:
+        # Both views are built here, on GPU, from the same raw batch.
+        if args.optimized:
             x_l = weak_transform(x_l).to(device, non_blocking=True, memory_format=torch.channels_last)
             y_l = y_l.to(device, non_blocking=True)
             x_u_w = weak_transform(x_u).to(device, non_blocking=True, memory_format=torch.channels_last)
             x_u_s = strong_transform(x_u).to(device, non_blocking=True, memory_format=torch.channels_last)
         else:
-            x_l = weak_transform(x_l).to(device)
-            y_l = y_l.to(device)
-            x_u_w = weak_transform(x_u).to(device)
-            x_u_s = strong_transform(x_u).to(device)
+            x_l, y_l = weak_transform(x_l).to(device), y_l.to(device)
+            x_u_w, x_u_s = weak_transform(x_u).to(device), strong_transform(x_u).to(device)
+        idx_device = idx.to(device, non_blocking=args.optimized)
 
-        idx_device = idx.to(device, non_blocking=optimized)
-
+        # --- Pseudo-labels, without gradient: one forward pass on the weak view. ---
         with torch.no_grad():
             with autocast(device_type="cuda", dtype=torch.bfloat16):
                 logits_u_w = model(x_u_w)
             probs_u_w = F.softmax(logits_u_w.float(), dim=1)
             max_prob, pseudo = torch.max(probs_u_w, dim=1)
 
-            if adaptive_threshold:
+            if args.adaptive_threshold:
                 acc_per_sample = classwise_acc[pseudo]
-                flexible_thresh = tau * (acc_per_sample / (2.0 - acc_per_sample))
-                mask = max_prob.ge(flexible_thresh).float()
-                select = max_prob.ge(tau)
-
+                mask = max_prob.ge(args.tau * (acc_per_sample / (2.0 - acc_per_sample))).float()
+                select = max_prob.ge(args.tau)
                 if select.any():
                     selected_label[idx_device[select]] = pseudo[select]
-
-                # bin 0 = count of still-unselected (-1) samples, bins 1..num_classes = per-class
-                # counts. thresh_warmup relies on bin 0 dominating early training to keep
-                # classwise_acc near 0 (permissive mask) until enough samples are confidently
-                # pseudo-labeled -- it must NOT be filtered out beforehand.
+                # Bin 0 counts the still-unselected (-1) samples, bins 1.. the per-class counts.
+                # thresh_warmup relies on bin 0 dominating early training to keep classwise_acc near
+                # 0, and the mask permissive, until enough samples are confidently pseudo-labeled --
+                # so it must not be filtered out beforehand.
                 counts = torch.bincount(selected_label + 1, minlength=num_classes + 1)
                 if counts.max().item() < selected_label.shape[0]:
-                    counts_per_class = counts[1:].float()
-                    if thresh_warmup:
+                    if args.thresh_warmup:
                         denom = max(counts.max().item(), 1)
-                        classwise_acc = counts_per_class / denom
                     else:
-                        wo_negative_one = counts.clone()
-                        wo_negative_one[0] = 0
-                        denom = max(wo_negative_one.max().item(), 1)
-                        classwise_acc = counts_per_class / denom
-            elif freematch_threshold:
+                        without_unselected = counts.clone()
+                        without_unselected[0] = 0
+                        denom = max(without_unselected.max().item(), 1)
+                    classwise_acc = counts[1:].float() / denom
+            elif args.freematch_threshold:
                 time_p = time_p * 0.999 + max_prob.mean() * 0.001
                 p_model = p_model * 0.999 + probs_u_w.mean(dim=0) * 0.001
-                p_model_cutoff = p_model / p_model.max()
-                threshold = time_p * p_model_cutoff[pseudo]
+                threshold = time_p * (p_model / p_model.max())[pseudo]
                 if args.dataset == "svhn" and args.freematch_svhn_clamp:
                     threshold = torch.clamp(threshold, min=0.9, max=0.95)
                 mask = max_prob.ge(threshold).float()
             else:
-                mask = max_prob.ge(tau).float()
+                mask = max_prob.ge(args.tau).float()
 
-            mask_ratio.append(mask.mean().item())
+            mask_ratios.append(mask.mean().item())
 
         optimizer.zero_grad(set_to_none=True)
 
-        with autocast(device_type="cuda", dtype=torch.bfloat16) if optimized else nullcontext():
-            batch_size_l_cur = x_l.shape[0]
+        with autocast(device_type="cuda", dtype=torch.bfloat16) if args.optimized else nullcontext():
+            n_l = x_l.shape[0]
+
+            # --- Supervised and consistency losses, in one fused forward pass. ---
             all_logits = model(torch.cat([x_l, x_u_s], dim=0))
-            logits_l = all_logits[:batch_size_l_cur]
-            logits_u_s = all_logits[batch_size_l_cur:]
+            loss_supervised = F.cross_entropy(all_logits[:n_l], y_l)
+            loss_consistency = (mask * F.cross_entropy(all_logits[n_l:], pseudo, reduction="none")).mean()
 
-            loss_supervised = F.cross_entropy(logits_l, y_l)
-            loss_consistency = (
-                mask * F.cross_entropy(logits_u_s, pseudo, reduction="none")
-            ).mean()
-
+            # --- Confidence-filtered Mixup: the contribution of this method. ---
+            # Labeled samples enter with their true label and a mask of 1, unlabeled ones with their
+            # pseudo-label and the mask above. The pool is shuffled to draw a partner for each
+            # sample, and each sample is mixed with its partner.
+            one_hot_l = F.one_hot(y_l, num_classes=num_classes).float()
+            one_hot_u = F.one_hot(pseudo, num_classes=num_classes).float()
             all_inputs = torch.cat([x_l, x_u_w], dim=0)
-            all_targets = torch.cat(
-                [
-                    F.one_hot(y_l, num_classes=num_classes).float(),
-                    F.one_hot(pseudo, num_classes=num_classes).float(),
-                ],
-                dim=0,
-            )
-            all_masks = torch.cat([torch.ones(batch_size_l_cur, device=device), mask], dim=0)
+            all_targets = torch.cat([one_hot_l, one_hot_u], dim=0)
+            all_masks = torch.cat([torch.ones(n_l, device=device), mask], dim=0)
 
-            indices = torch.randperm(all_inputs.size(0), device=all_inputs.device)
-            all_inputs = all_inputs[indices]
-            all_targets = all_targets[indices]
-            all_masks = all_masks[indices]
+            partner = torch.randperm(all_inputs.size(0), device=all_inputs.device)
+            all_inputs, all_targets, all_masks = all_inputs[partner], all_targets[partner], all_masks[partner]
 
-            lam_x = beta_dist.sample((batch_size_l_cur,))
+            # lambda >= 0.5 keeps the anchor dominant in the mix.
+            lam_x = beta_dist.sample((n_l,))
             lam_u = beta_dist.sample((x_u_w.size(0),))
             lam_x = torch.maximum(lam_x, 1 - lam_x)
             lam_u = torch.maximum(lam_u, 1 - lam_u)
 
-            lam_x_img = lam_x.view(-1, 1, 1, 1)
-            lam_u_img = lam_u.view(-1, 1, 1, 1)
-            lam_x_lbl = lam_x.view(-1, 1)
-            lam_u_lbl = lam_u.view(-1, 1)
+            mixup_x = torch.lerp(all_inputs[:n_l], x_l, lam_x.view(-1, 1, 1, 1))
+            mixup_u = torch.lerp(all_inputs[n_l:], x_u_w, lam_u.view(-1, 1, 1, 1))
+            mixup_targets_x = torch.lerp(all_targets[:n_l], one_hot_l, lam_x.view(-1, 1))
+            mixup_targets_u = torch.lerp(all_targets[n_l:], one_hot_u, lam_u.view(-1, 1))
 
-            mixup_x = torch.lerp(all_inputs[:batch_size_l_cur], x_l, lam_x_img)
-            mixup_u = torch.lerp(all_inputs[batch_size_l_cur:], x_u_w, lam_u_img)
+            mixup_logits = model(torch.cat([mixup_x, mixup_u], dim=0))
+            mixup_targets = torch.cat([mixup_targets_x, mixup_targets_u], dim=0)
 
-            mixup_targets_x = torch.lerp(all_targets[:batch_size_l_cur], F.one_hot(y_l, num_classes=num_classes).float(), lam_x_lbl)
-            mixup_targets_u = torch.lerp(all_targets[batch_size_l_cur:], F.one_hot(pseudo, num_classes=num_classes).float(), lam_u_lbl)
-
-            all_mixup_inputs = torch.cat([mixup_x, mixup_u], dim=0)
-            all_logits = model(all_mixup_inputs)
-            # logits_l_mixup = all_logits[:batch_size_l_cur]
-            # logits_u_mixup = all_logits[batch_size_l_cur:]
-
-            all_mixup_targets = torch.cat([mixup_targets_x, mixup_targets_u], dim=0)
-
+            # all_masks is the *partner's* mask after the shuffle: a mixed sample counts only if the
+            # sample it was mixed with was confident enough.
             loss_mixup = args.mixup_weight * (
-                all_masks * F.cross_entropy(all_logits, all_mixup_targets, reduction="none")
+                all_masks * F.cross_entropy(mixup_logits, mixup_targets, reduction="none")
             ).mean()
-            loss = loss_supervised + loss_consistency + loss_mixup
 
+            loss = loss_supervised + loss_consistency + loss_mixup
             losses.append(loss.item())
 
         loss.backward()
         optimizer.step()
         scheduler.step()
-
         if ema is not None:
             ema.update(base_model)
 
-        pseudo_labels[idx] = torch.where(mask.bool().cpu(), pseudo.cpu(), pseudo_labels[idx])
-        confidences[idx] = torch.where(mask.bool().cpu(), max_prob.cpu(), confidences[idx])
+        track_pseudo_labels(pseudo_labels, confidences, idx, mask, pseudo, max_prob)
 
-        if (step + 1) % test_period == 0 or step == 0 or step == max_steps - 1:
+        if (step + 1) % args.test_period == 0 or step == 0 or step == args.max_steps - 1:
             if ema is not None:
                 ema.copy_to(eval_model)
-            f1, acc, topk_accs = evaluate_f1_and_accuracy(eval_model, test_loader, device, args.topk)
-            metrics["step"].append(step + 1)
-            metrics["test_f1"].append(f1)
-            metrics["test_acc"].append(acc)
-            metrics["time_elapsed"].append(time.time() - start_time)
-            metrics["mask_ratio"].append(np.mean(mask_ratio))
-            metrics["train_loss"].append(np.mean(losses))
-            metrics["topk_acc"].append(topk_accs)
-            mask_ratio = []
-            losses = []
-
-            pl_metrics = compute_pseudo_label_metrics(
-                pseudo_labels, confidences, last_pseudo_labels, last_confidences, true_labels
-            )
-            for key, value in pl_metrics.items():
-                metrics[key].append(value)
-
-            last_pseudo_labels = pseudo_labels.clone()
-            last_confidences = confidences.clone()
-
-            with open(f"{results_dir}/{method_name}_metrics.json", "w") as f:
-                json.dump(metrics, f, indent=4)
-
-            if verbose:
-                # clear the in-place step line before logging the test-phase summary
-                print()
-            topk_str = " ".join(f"Top-{k}: {v:.4f}," for k, v in enumerate(topk_accs, start=1)) if args.topk > 1 else ""
-            logger.info(
-                f"Test F1: {f1:.4f}, Acc: {acc:.4f}, {topk_str} PL Quality: {pl_metrics['pl_quality']:.4f}, "
-                f"Mask Ratio: {metrics['mask_ratio'][-1]:.4f}, Error Reinforcement: {pl_metrics['error_reinforcement']}, Correct Reinforcement: {pl_metrics['correct_reinforcement']}, "
-                f"Corrections: {pl_metrics['corrections']}, Bad Corrections: {pl_metrics['bad_corrections']}, New Errors: {pl_metrics['new_errors']}, New Correct: {pl_metrics['new_correct']}, Loss: {metrics['train_loss'][-1]:.4f}, "
-                f"Time: {metrics['time_elapsed'][-1]:.2f}s"
-            )
-
-            if target_acc is not None and acc >= target_acc:
-                logger.info(f"Reached target_acc={target_acc:.4f} at step {step + 1} (acc={acc:.4f}) — stopping early.")
+            stop = evaluate_and_log(args, step, metrics, path, eval_model, test_loader, device,
+                                    start_time, losses, mask_ratios, pseudo_state)
+            losses, mask_ratios = [], []
+            if stop:
                 break
-
-            if args.max_minutes is not None and metrics["time_elapsed"][-1] >= args.max_minutes * 60:
-                logger.info(f"Reached the {args.max_minutes:.0f}-minute budget at step {step + 1} (acc={acc:.4f}) -- stopping.")
-                break
-        elif verbose:
-            print(
-                f"Step {step + 1}/{max_steps}, Loss: {loss.item():.4f}, "
-                f"Sup: {loss_supervised.item():.4f}, Cons: {loss_consistency.item():.4f}, Mixup: {loss_mixup.item():.4f}, "
-                f"Mask Ratio: {mask_ratio[-1]:.4f}",
-                end="\r",
-                flush=True,
-            )
+        elif args.verbose:
+            print(f"Step {step + 1}/{args.max_steps}, Loss: {loss.item():.4f}, "
+                  f"Sup: {loss_supervised.item():.4f}, Cons: {loss_consistency.item():.4f}, "
+                  f"Mixup: {loss_mixup.item():.4f}, Mask Ratio: {mask_ratios[-1]:.4f}",
+                  end="\r", flush=True)
 
 
 if __name__ == "__main__":
