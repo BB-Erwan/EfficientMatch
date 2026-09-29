@@ -34,6 +34,11 @@ the cost of machinery executed inside the training loop, and FLOPs measure compu
 the hardware and software stack. A method that is efficient in the sense of this work has to be so
 on all three at once.
 
+RegMixMatch runs 2,048 supervised-only iterations on the labeled batch before training proper, to
+seed the moving averages of its adaptive threshold (`--warmup_steps`). These iterations run before
+the clock starts: they count neither in the reported time, nor in the number of iterations, nor in
+the FLOPs.
+
 ## Iterations to reach the target (×1000)
 
 | Method | SVHN-250 | | | CIFAR-10-250 | | | CIFAR-10-4000 | | | CIFAR-100-2500 | | |

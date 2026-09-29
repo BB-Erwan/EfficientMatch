@@ -150,7 +150,7 @@ def run_efficientmatch():
             unlabeled_iter = iter(unlabeled_loader)
             x_u, y_u, idx = next(unlabeled_iter)
 
-        # Both views are built here, on GPU, from the same raw batch.
+        # Both views are built here, from the same raw batch, then moved to the GPU.
         if args.optimized:
             x_l = weak_transform(x_l).to(device, non_blocking=True, memory_format=torch.channels_last)
             y_l = y_l.to(device, non_blocking=True)

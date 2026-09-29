@@ -25,8 +25,8 @@ FIGURES = os.path.join(REPO_ROOT, "figures")
 # the methods that converge, so a method that never does simply trails off the right edge.
 AXES = {
     "svhn-250":      dict(dataset="svhn",     num_labeled=250,  target_acc=0.90,
-                          opts=["--ymin", "0.75", "--auto_ymax", "--legend_top", "--auto_xmin",
-                                "--xmax", "45"]),
+                          xmax={"time": "45", "steps": "43500", "flops": "37000000"},
+                          opts=["--ymin", "0.75", "--auto_ymax", "--legend_top", "--auto_xmin"]),
     "cifar10-250":   dict(dataset="cifar10",  num_labeled=250,  target_acc=0.80,
                           opts=["--ymin", "0.60", "--ymax", "0.85", "--auto_xmax",
                                 "--legend_loc", "best"]),
@@ -45,6 +45,8 @@ def all_methods(config, seed, xaxis):
     args = ["plot_acc_vs_time.py", "--dataset", cfg["dataset"],
             "--num_labeled", str(cfg["num_labeled"]), "--seed", str(seed),
             "--target_acc", str(cfg["target_acc"]), "--xaxis", xaxis] + cfg["opts"]
+    if "xmax" in cfg:   # a fixed x limit, one per axis since each has its own unit
+        args += ["--xmax", cfg["xmax"][xaxis]]
     if cfg.get("widen_factor"):
         args += ["--widen_factor", str(cfg["widen_factor"])]
     name = f"all_methods_acc_vs_{xaxis}_{cfg['dataset']}_{cfg['num_labeled']}_seed{seed}.png"

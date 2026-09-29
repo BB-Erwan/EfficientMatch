@@ -5,7 +5,8 @@ predictions over two weakly augmented views of the same unlabeled batch and shar
 then everything -- labeled and unlabeled alike -- is mixed with a shuffled partner:
 
   guess  = sharpen((p(y | U_w1) + p(y | U_w2)) / 2, T)
-  L_x    cross-entropy on the mixed labeled part, against its mixed one-hot target
+  L_x    cross-entropy on the mixed labeled part, against the labeled sample's own label (the
+         mixed target is computed below but not used; MixMatch as published uses it)
   L_u    mean squared error on the mixed unlabeled part, against its mixed guess
 
   L = L_x + 100 * ramp(step) * L_u,    ramp rising linearly over the first 16 000 iterations
@@ -158,7 +159,7 @@ def run_mixmatch():
             all_logits = model(torch.cat([mixup_x, mixup_u], dim=0))
             logits_l, logits_u = all_logits[:n_l], all_logits[n_l:]
 
-        loss_l = F.cross_entropy(logits_l, y_l)
+        loss_l = F.cross_entropy(logits_l, y_l)   # against y_l, not mixup_targets_x: see the module docstring
 
         optimizer.zero_grad(set_to_none=True)
         loss_u = F.mse_loss(F.softmax(logits_u.float(), dim=1), mixup_targets_u.float())

@@ -73,9 +73,13 @@ def class_counts(labeled_ds, num_classes):
 def build_transforms(mean, std):
     """(normalise-only, weak, strong).
 
-    Weak is the standard flip-and-crop; strong prepends RandAugment. Both are applied on GPU to the
-    batch, which is why the datasets below are only converted to tensors: the augmentation happens
-    in the training loop, not in the dataloader.
+    Weak is the standard flip-and-crop; strong prepends RandAugment. Both are applied on the CPU to
+    the whole batch, in the training loop, just before it is moved to the GPU; this is why the
+    datasets below are only converted to tensors.
+
+    Given a batch tensor, these v2 transforms draw their random parameters once for the whole batch:
+    every image in it gets the same flip, the same crop and the same RandAugment operations. Every
+    run of the paper was made this way, for every method alike.
     """
     norm = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean, std)])
     weak = v2.Compose([
@@ -103,8 +107,8 @@ def build_loaders(labeled_ds, unlabeled_ds, test_ds, norm_transform, batch_size_
     track how that sample's pseudo-label evolves between evaluations. The wrapped unlabeled dataset
     is returned as well because the loop reads the true labels off it to score those pseudo-labels.
 
-    Only ToTensor is applied here: the weak and strong views are built on GPU inside the training
-    loop, from the same raw batch.
+    Only ToTensor is applied here: the weak and strong views are built inside the training loop,
+    from the same raw batch.
     """
     labeled_ds = TransformedDataset(labeled_ds, transforms.ToTensor())
     unlabeled_ds = TransformedDatasetWithIndex(unlabeled_ds, transform=transforms.ToTensor())
