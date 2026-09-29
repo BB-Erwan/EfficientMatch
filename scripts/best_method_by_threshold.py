@@ -1,86 +1,137 @@
-"""Regenerates BEST_METHOD_BY_THRESHOLD.md from results/ (5 main methods, seuils target-5% / target-10%)."""
-import json, os
+"""Regenerate docs/threshold_sensitivity.md: which method is fastest once the target accuracy is
+lowered by 5 or 10 points.
+
+The main experiment ranks methods by the budget needed to reach one fixed target per configuration.
+That target is chosen rather than given, so it is part of the comparison: this script measures how
+much the ranking moves when it changes, which is the evidence behind section 6 of the paper.
+
+    python scripts/best_method_by_threshold.py
+"""
+import json
+import os
 from collections import Counter
-from run_analysis import EVAL_SECONDS, first_reaching, corrected_minutes, gflops_for
+
+from run_analysis import EVAL_SECONDS, corrected_minutes, first_reaching, gflops_for
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BUDGET_SECONDS = 120 * 60   # same 2-hour cap as the main experiment
 SEEDS = (2312, 308, 2701)
 METHODS = ["efficientmatch", "fixmatch", "flexmatch", "mixmatch", "regmixmatch"]
-CONFIGS = [  # (label, dataset, n_labeled, target, widen_factor, file suffix)
+LABEL = {"efficientmatch": "EfficientMatch", "fixmatch": "FixMatch", "flexmatch": "FlexMatch",
+         "mixmatch": "MixMatch", "regmixmatch": "RegMixMatch"}
+CONFIGS = [  # label, dataset, labels, original target, widen factor, result-file suffix
     ("SVHN, 250 labels", "svhn", 250, 0.90, 2, ""),
     ("CIFAR-10, 250 labels", "cifar10", 250, 0.80, 2, ""),
     ("CIFAR-10, 4000 labels", "cifar10", 4000, 0.90, 2, ""),
-    ("CIFAR-100, 2500 labels (WF4)", "cifar100", 2500, 0.50, 4, "_wf4"),
+    ("CIFAR-100, 2500 labels", "cifar100", 2500, 0.50, 4, "_wf4"),
 ]
 
 
-def measure(ds, n, seed, m, thr, wf, suf):
-    p = os.path.join(ROOT, "results", f"{ds}-labeled-{n}-seed-{seed}", f"{m}_ema{suf}_metrics.json")
-    if not os.path.exists(p):
+def measure(dataset, labels, seed, method, threshold, widen_factor, suffix):
+    """(corrected minutes, TFLOPs) for the first evaluation reaching `threshold`, or None if the
+    method never gets there inside the 2-hour budget."""
+    path = os.path.join(ROOT, "results", f"{dataset}-labeled-{labels}-seed-{seed}",
+                        f"{method}_ema{suffix}_metrics.json")
+    if not os.path.exists(path):
         return None
-    d = json.load(open(p))
-    hit = first_reaching(d, thr)
+    data = json.load(open(path))
+    hit = first_reaching(data, threshold)
     if hit is None:
         return None
-    i, step, _, t = hit
-    if t / 60 > 120:
+    index, step, _, seconds = hit
+    if seconds > BUDGET_SECONDS:
         return None
-    return corrected_minutes(t, i + 1, EVAL_SECONDS[wf]), gflops_for(m + "_ema", wf, ds) * step / 1000
+    return (corrected_minutes(seconds, index + 1, EVAL_SECONDS[widen_factor]),
+            gflops_for(method + "_ema", widen_factor, dataset) * step / 1000)
 
 
-def winner(vals):
-    vals = {k: v for k, v in vals.items() if v is not None}
-    return min(vals, key=vals.get) if vals else "aucune"
+def winner(values):
+    values = {k: v for k, v in values.items() if v is not None}
+    return min(values, key=values.get) if values else "none"
 
 
-def majority(ws):
-    c = Counter(ws).most_common()
-    if c[0][1] >= 2 and (len(c) == 1 or c[1][1] < c[0][1]):
-        return c[0][0]
-    return "pas de majorité"
+def majority(winners):
+    counts = Counter(winners).most_common()
+    if counts[0][1] >= 2 and (len(counts) == 1 or counts[1][1] < counts[0][1]):
+        return LABEL.get(counts[0][0], counts[0][0])
+    return "no majority"
 
 
-detail, summary = {}, {}
-for label, ds, n, target, wf, suf in CONFIGS:
-    for red in (0.05, 0.10):
-        thr = round(target - red, 2)
-        wt, wfl, rows = [], [], []
-        for seed in SEEDS:
-            res = {m: measure(ds, n, seed, m, thr, wf, suf) for m in METHODS}
-            bt = winner({m: (v[0] if v else None) for m, v in res.items()})
-            bf = winner({m: (v[1] if v else None) for m, v in res.items()})
-            wt.append(bt); wfl.append(bf)
-            rows.append((thr, seed, bt, bf, res))
-        detail[(label, red)] = rows
-        summary[(label, red)] = (majority(wt), majority(wfl))
+def main():
+    detail, summary = {}, {}
+    for label, dataset, labels, target, widen_factor, suffix in CONFIGS:
+        for drop in (0.05, 0.10):
+            threshold = round(target - drop, 2)
+            by_time, by_flops, rows = [], [], []
+            for seed in SEEDS:
+                results = {m: measure(dataset, labels, seed, m, threshold, widen_factor, suffix)
+                           for m in METHODS}
+                best_time = winner({m: (v[0] if v else None) for m, v in results.items()})
+                best_flops = winner({m: (v[1] if v else None) for m, v in results.items()})
+                by_time.append(best_time)
+                by_flops.append(best_flops)
+                rows.append((threshold, seed, best_time, best_flops, results))
+            detail[(label, drop)] = rows
+            summary[(label, drop)] = (majority(by_time), majority(by_flops))
 
-out = []
-w = out.append
-w("# Meilleure méthode par seuil d'accuracy réduit (-5% / -10%)\n")
-w("Ce document (généré par `scripts/best_method_by_threshold.py`) identifie, pour chacune des 4 configurations "
-  "retenues de `EXPERIENCE_PRINCIPALE.md` (CIFAR-100 10000 labels exclu), quelle méthode parmi les 5 méthodes "
-  "principales (efficientmatch, fixmatch, flexmatch, mixmatch, regmixmatch) atteint le plus vite (temps corrigé "
-  "du coût des évaluations) et au moindre coût (FLOPs cumulés) un seuil d'accuracy réduit de 5 ou 10 points par "
-  "rapport au target_acc habituel de la configuration. La variante efficientmatch_freematch n'est pas incluse.\n")
-w("Seuils (target original → -5% → -10%) :\n")
-w("| Configuration | Target original | Seuil -5% | Seuil -10% |\n|---|---:|---:|---:|")
-for label, ds, n, target, wf, suf in CONFIGS:
-    w(f"| {label} | {target*100:.0f}% | {(target-.05)*100:.0f}% | {(target-.10)*100:.0f}% |")
-w("\n## Tableau récapitulatif (méthode gagnante, majorité sur 3 seeds)\n")
-w("| Configuration | -5% (temps) | -5% (FLOPs) | -10% (temps) | -10% (FLOPs) |\n|---|---|---|---|---|")
-for label, *_ in CONFIGS:
-    a, b = summary[(label, 0.05)], summary[(label, 0.10)]
-    w(f"| {label} | {a[0]} | {a[1]} | {b[0]} | {b[1]} |")
-w("\n## Détail par seed\n")
-for label, ds, n, target, wf, suf in CONFIGS:
-    w(f"### {label}\n")
-    w("| Seuil | Seed | Meilleur temps | Meilleur FLOPs | Temps corrigé (min) par méthode | TFLOPs par méthode |\n|---|---|---|---|---|---|")
-    for red in (0.05, 0.10):
-        for thr, seed, bt, bf, res in detail[(label, red)]:
-            tm = ", ".join(f"{m} {v[0]:.1f}" if v else f"{m} n/a" for m, v in res.items())
-            fl = ", ".join(f"{m} {v[1]:,.0f}".replace(",", " ") if v else f"{m} n/a" for m, v in res.items())
-            w(f"| -{red*100:.0f}% ({thr*100:.0f}%) | {seed} | {bt} | {bf} | {tm} | {fl} |")
-    w("")
-w("`n/a` : seuil jamais atteint par la run.\n")
-w("## Reproduire\n\n```bash\npython scripts/best_method_by_threshold.py\n```\n")
-open(os.path.join(ROOT, "BEST_METHOD_BY_THRESHOLD.md"), "w", encoding="utf-8").write("\n".join(out))
+    out = ["# Sensitivity to the target accuracy\n",
+           "Backs **section 6** of the paper. Generated by `scripts/best_method_by_threshold.py`.\n",
+           "Every other table in this repository ranks methods by the budget needed to reach one fixed",
+           "target per configuration. That target is chosen rather than given, so it is part of the",
+           "comparison. Here the five main methods are ranked again at targets lowered by 5 and by 10",
+           "points, keeping everything else identical: same runs, same 2-hour budget, same corrected time.",
+           "A method that never reaches the lowered target within the budget is left out of the ranking.\n",
+           "The FreeMatch-thresholding variant is not included.\n",
+           "## Thresholds\n",
+           "| Configuration | Original target | −5 points | −10 points |", "|---|---:|---:|---:|"]
+    for label, _, _, target, _, _ in CONFIGS:
+        out.append(f"| {label} | {target*100:.0f}% | {(target-.05)*100:.0f}% | {(target-.10)*100:.0f}% |")
+
+    out += ["\n## Fastest method, majority over the three seeds\n",
+            "| Configuration | −5% (time) | −5% (FLOPs) | −10% (time) | −10% (FLOPs) |",
+            "|---|---|---|---|---|"]
+    for label, *_ in CONFIGS:
+        five, ten = summary[(label, 0.05)], summary[(label, 0.10)]
+        out.append(f"| {label} | {five[0]} | {five[1]} | {ten[0]} | {ten[1]} |")
+
+    out.append("\n## Per seed\n")
+    for label, *_ in CONFIGS:
+        out += [f"### {label}\n",
+                "| Threshold | Seed | Fastest | Cheapest | Corrected time per method (min) | TFLOPs per method |",
+                "|---|---|---|---|---|---|"]
+        for drop in (0.05, 0.10):
+            for threshold, seed, best_time, best_flops, results in detail[(label, drop)]:
+                times = ", ".join(f"{LABEL[m]} {v[0]:.1f}" if v else f"{LABEL[m]} n/a"
+                                  for m, v in results.items())
+                flops = ", ".join(f"{LABEL[m]} {v[1]:,.0f}".replace(",", " ") if v else f"{LABEL[m]} n/a"
+                                  for m, v in results.items())
+                out.append(f"| −{drop*100:.0f}% ({threshold*100:.0f}%) | {seed} | {best_time} | "
+                           f"{best_flops} | {times} | {flops} |")
+        out.append("")
+    out.append("`n/a`: the method never reached that threshold inside the 2-hour budget.\n")
+
+    out += ["## What this shows\n",
+            "Lowering the target by 5 to 10 points shifts which method is fastest, but not uniformly.",
+            "On SVHN/250, EfficientMatch remains fastest in time at a 5-point reduction (2 of 3 seeds),",
+            "but MixMatch takes over at 10 points, in both time and FLOPs (2 of 3 seeds each); even at 5",
+            "points, FLOPs shows no clear majority, with three seeds yielding three different winners.",
+            "On CIFAR-10/250, EfficientMatch stays fastest in time even at 10 points (2 of 3 seeds); only",
+            "the FLOPs ranking flips to MixMatch, and only at the largest reduction. CIFAR-10/4000, where",
+            "MixMatch is already competitive at the original threshold, shows little further change.",
+            "CIFAR-100/2500 is the clearest case: MixMatch fails outright at the original threshold, yet",
+            "becomes the unanimous winner in both time and FLOPs at a 10-point reduction, moving from",
+            "total failure to total dominance as the target threshold alone changes.\n",
+            "This is consistent with the paper's diagnosis: the pseudo-label admission bottleneck",
+            "EfficientMatch targets matters most when the label budget is small *and* the target is high;",
+            "relaxing either condition erodes the advantage. EfficientMatch's advantage should thus be",
+            "read as confined to that regime, not as superiority at every quality level or label budget.\n"]
+
+    path = os.path.join(ROOT, "docs", "threshold_sensitivity.md")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(out))
+    print("wrote", path)
+
+
+if __name__ == "__main__":
+    main()

@@ -20,7 +20,7 @@ price any batch size, no need to remeasure per shape) alongside wall-clock time_
 to let a short run be compared against a fixmatch run of the same step budget on both axes: FLOPs
 (should favor Fast FixMatch, confirming the paper) and wall-clock time (may not, if the varying
 tensor shapes defeat this pipeline's cudnn.benchmark/torch.compile assumptions -- see
-ABLATION_FAST_FIXMATCH.md).
+docs/fast_fixmatch.md).
 """
 import argparse
 import json
@@ -105,7 +105,7 @@ parser.add_argument("--total_steps", type=int, default=2**20, help="Nominal hori
 parser.add_argument("--lr_schedule", type=str, default="fixmatch_cosine", choices=["fixmatch_cosine", "cosine_annealing"])
 parser.add_argument("--verbose", type=str2bool, default=False)
 parser.add_argument("--target_acc", type=float, default=None, help="Stop the run early once test_acc reaches this value.")
-parser.add_argument("--max_minutes", type=float, default=None, help="Stop the run once it has been training for this many minutes, checked at each evaluation. The paper's protocol caps every run at 120 minutes (see run_experiment.py).")
+parser.add_argument("--max_minutes", type=float, default=None, help="Stop the run once it has been training for this many minutes: checked at each evaluation, and counted from the first training step, so model compilation does not eat into the budget. The paper caps every run at 120 minutes; run_experiment.py passes it.")
 parser.add_argument("--use_ema", type=str2bool, default=True, help="Evaluate an EMA of the weights instead of the raw training weights.")
 parser.add_argument("--mu", type=int, default=7, help="Unlabeled:labeled batch size ratio -> defines the MAX (not fixed) unlabeled batch size for CBS.")
 parser.add_argument("--ema_decay", type=float, default=0.999)

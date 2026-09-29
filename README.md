@@ -1,65 +1,136 @@
-# EfficientMatch
+# EfficientMatch: Faster Convergence in Semi-Supervised Learning
 
-Étude comparative d'algorithmes d'apprentissage semi-supervisé (SSL) sur CIFAR-10, en régime faible
-labellisation (`n_labels` réduit). Chaque algorithme est un **script autonome** dans `scripts/` :
-augmentations, hyperparamètres et boucle d'entraînement vivent tous dans le même fichier (rien n'est
-factorisé entre algorithmes sauf ce qui est strictement identique quel que soit l'algorithme --
-architecture du modèle, EMA, évaluation).
+Code and results for the paper, included here as [`paper.pdf`](paper.pdf).
 
-## Algorithmes implémentés
+Semi-supervised learning is usually evaluated on the accuracy a method eventually reaches, after a
+fixed budget of 2^20 iterations. This work asks the complementary question — **which method reaches
+a useful accuracy at the lowest computational cost?** — and proposes EfficientMatch, a method
+designed for that regime.
 
-| Algorithme | Script | Référence | Idée clé |
-|---|---|---|---|
-| FixMatch | [scripts/fixmatch.py](scripts/fixmatch.py) | Sohn et al., 2020 | Baseline : perte supervisée + cohérence faible/forte filtrée par un seuil de confiance fixe (`tau`). |
-| FlexMatch | [scripts/flexmatch.py](scripts/flexmatch.py) | Zhang et al., 2021 | FixMatch + seuillage **adaptatif par classe** (Curriculum Pseudo Labeling), pour corriger le biais envers les classes "faciles". |
-| MixMatch | [scripts/mixmatch.py](scripts/mixmatch.py) | Berthelot et al., 2019 | Pas d'augmentation forte : guessing par moyenne de K augmentations faibles + sharpening + Mixup entre labellisé et non labellisé. |
-| EfficientMatch | [scripts/efficientmatch.py](scripts/efficientmatch.py) | (contribution de ce dépôt) | FixMatch + canal de **Mixup filtré** par le masque de confiance dur, entre le batch labellisé et le batch non labellisé faiblement augmenté. |
+EfficientMatch adds a Mixup channel to FixMatch's filtered consistency loss, and filters it with the
+confidence mask the consistency loss has already computed, so no new threshold is introduced. The
+whole contribution is the ~40 lines building `loss_mixup` in
+[`scripts/efficientmatch.py`](scripts/efficientmatch.py).
 
-D'autres algorithmes pourront être ajoutés plus tard, chacun comme un nouveau script autonome du
-même type.
+Across the twelve seed/configuration combinations reported, EfficientMatch reaches the target
+accuracy in less wall-clock time and fewer FLOPs than MixMatch, FixMatch, FlexMatch and RegMixMatch,
+without exception.
 
-## Structure du dépôt
+## Install
+
+```bash
+pip install -r requirements.txt
+```
+
+A CUDA GPU is expected. Every result here was produced on a single NVIDIA RTX 5060 Ti (8 GB), which
+is what constrains CIFAR-100 to WideResNet-28-4. Datasets download themselves into `data/` on first
+use.
+
+## Reproduce one number in five minutes
+
+The fastest cell of the main table is EfficientMatch on SVHN, which reaches 90% in under six
+minutes:
+
+```bash
+python scripts/efficientmatch.py --dataset svhn --num_labeled 250 --seed 2312 --target_acc 0.90
+```
+
+It writes `results/svhn-labeled-250-seed-2312/efficientmatch_ema_metrics.json`. Compare it with the
+other methods on that configuration:
+
+```bash
+python scripts/run_analysis.py compare --dataset svhn --num_labeled 250 --seed 2312
+```
+
+## Reproduce the paper
+
+Two entry points cover everything. Neither re-runs work that is already on disk.
+
+```bash
+python run_experiment.py --list      # the experiments, the tables they feed, how many are done
+python run_experiment.py --check     # verify every run the paper reports has its result file
+python run_experiment.py --experiment main --dry-run    # see the exact commands first
+python run_experiment.py --experiment main              # then run them
+```
+
+```bash
+python make_figures.py --list        # the figures and how each is produced
+python make_figures.py               # draw whatever is missing from figures/
+```
+
+`--experiment` takes `main`, `mu`, `lambda-mix`, `mixing-target`, `matched-mu`, `freematch`,
+`freematch-noclamp` or `asymptotic`, and `--config`, `--method` and `--seed` narrow it further. The
+main sweep is 60 runs of up to two hours each, so start with `--dry-run`.
+
+## Results
+
+Wall-clock minutes to reach the target accuracy, corrected for evaluation cost, per seed. `†` marks
+a method that never reached the target within the two-hour budget.
+
+| Method | SVHN-250 (90%) | CIFAR-10-250 (80%) | CIFAR-10-4000 (90%) | CIFAR-100-2500 (50%) |
+|---|---|---|---|---|
+| **EfficientMatch** | **5.7 / 5.2 / 6.3** | **29.6 / 20.3 / 17.9** | **28.2 / 29.3 / 29.8** | **55.1 / 48.1 / 58.0** |
+| FixMatch | 7.7 / 6.3 / 7.7 | 113.7 / 58.2 / 56.3 | 85.2 / 79.1 / 86.9 | † |
+| FlexMatch | † | 63.3 / 51.3 / 40.7 | 58.1 / 86.4 / 76.8 | 69.2 / 82.8 / 68.0 |
+| MixMatch | 6.5 / 17.4 / 11.8 | † | 55.5 / 59.6 / 46.3 | † |
+| RegMixMatch | 10.2 / 8.2 / 11.2 | 60.6 / 43.8 / 36.1 | 42.9 / 46.2 / 47.2 | 61.0 / 52.5 / 70.1 |
+
+Iterations and FLOPs, the two other metrics the paper reports, are in
+[`docs/main_experiment.md`](docs/main_experiment.md). They do not rank the methods the same way,
+which is the point: RegMixMatch converges in the fewest iterations everywhere, and is still slower
+and more FLOP-costly, because each of its iterations is much more expensive.
+
+## Documentation
+
+| Document | Covers |
+|---|---|
+| [docs/main_experiment.md](docs/main_experiment.md) | The five methods on the four configurations (Tables 2, 3, 12, 13), and the FreeMatch-thresholding variant (Table 4, Appendix A.5) |
+| [docs/ablations.md](docs/ablations.md) | Unlabeled ratio mu, Mixup weight, mixing target, matched-mu study (Tables 5 to 8, Table 10) |
+| [docs/threshold_sensitivity.md](docs/threshold_sensitivity.md) | How the ranking moves when the target accuracy is lowered (section 6) |
+| [docs/fast_fixmatch.md](docs/fast_fixmatch.md) | Why Fast FixMatch's FLOP gain does not become a wall-clock gain here (Table 9, Appendix A.4) |
+| [docs/asymptotic.md](docs/asymptotic.md) | What happens with no accuracy target at all (Table 11, Appendix A.8) |
+| [docs/flops.md](docs/flops.md) | FLOPs per iteration for every method, and the cost of one evaluation (Appendix B) |
+| [results/README.md](results/README.md) | How result files are named and which ones the paper uses |
+
+## Repository layout
 
 ```
+run_experiment.py        Run any experiment in the paper
+make_figures.py          Redraw any figure in the paper
+
 scripts/
-    fixmatch.py      # script autonome : python fixmatch.py [options]
-    flexmatch.py     # script autonome : python flexmatch.py [options]
-    mixmatch.py      # script autonome : python mixmatch.py [options]
-    efficientmatch.py  # script autonome : python efficientmatch.py [options]
-    analyze.py       # calcule AUC, itérations jusqu'à seuil (métriques absentes des logs bruts)
-    models.py        # WideResNet (partagé)
-    ema.py           # EMA des poids (partagée)
-    evaluate.py      # évaluation top-1 (partagée)
-    data.py          # chargement CIFAR-10 + split + wrapping de dataset (partagé, aucune
-                      # augmentation ni composition de vues -- cf. chaque script)
-    requirements.txt
-    README.md        # détails d'utilisation, options CLI complètes
+  efficientmatch.py      The method of the paper
+  fixmatch.py  flexmatch.py  mixmatch.py  regmixmatch.py    The four baselines
+  fast_fixmatch.py       Curriculum batch size, measured separately (Appendix A.4)
+  efficientmatch_hard.py  efficientmatch_soft.py            Mixing-target ablation (Appendix A.3)
+
+  models.py  ema.py  utils.py  datasets_utils.py            Shared by every method
+
+  run_analysis.py        Compare methods on one configuration, from the result files
+  flops_analysis.py      FLOPs per iteration, on dummy tensors
+  measure_eval_time.py  ghost_method.py                     Cost of one evaluation pass
+  best_method_by_threshold.py                               Regenerates docs/threshold_sensitivity.md
+  plot_acc_vs_time.py  plot_acc_vs_pl.py  plot_ablation_mixw*.py    Figures
+
+results/                 One JSON per run, see results/README.md
+figures/                 Every figure in the paper
+docs/                    Detailed results, organised by paper section
 ```
 
-## Utilisation
+Each method is a **standalone script**: its training loop, augmentations and hyperparameters all
+live in one file, and only what is identical across methods by construction — the architecture, the
+EMA, the evaluation, the dataset split — is shared. Reading `fixmatch.py` next to
+`efficientmatch.py` shows the whole difference between the two methods, with nothing hidden in a
+framework.
 
-```powershell
-pip install -r scripts/requirements.txt
+## Protocol in brief
 
-python scripts/fixmatch.py
-python scripts/flexmatch.py --n-labels 250
-python scripts/mixmatch.py --alpha-mix 0.5 --K 65536
-python scripts/efficientmatch.py --lambda-mix 0.5
-```
-
-Tous les hyperparamètres sont exposés en flags CLI, propres à chaque script (`--help` pour la liste
-complète). Voir [scripts/README.md](scripts/README.md) pour le détail des options et des exemples.
-
-## Métriques suivies
-
-Chaque run journalise, à intervalles réguliers (`--eval-every`), l'accuracy top-1 sur le jeu de test
-(poids EMA) et la perte, dans `./logs/<algo>_cifar10_n<n_labels>_K<K>_seed<seed>[_<tag>].json` -- un
-format commun à tous les scripts.
-
-Les métriques du papier proprement dites (AUC normalisée sur `[0, K]`, itérations pour atteindre un
-seuil de performance, avec report de la dernière valeur pour les runs incomplets) ne sont PAS
-calculées pendant l'entraînement : elles sont dérivées après coup des logs bruts par
-[scripts/analyze.py](scripts/analyze.py).
+Each run stops when the EMA accuracy reaches its target, or after two hours
+(`--target_acc`, `--max_minutes`). Reported time is corrected for the cost of the periodic
+evaluations, which is identical across methods for a given architecture. Each method keeps the
+unlabeled:labeled ratio established for it in the literature: mu = 7 for FixMatch, FlexMatch and
+RegMixMatch, mu = 1 for MixMatch, mu = 3 for EfficientMatch. Full hyperparameters are in Table 14 of
+the paper, and every default is visible with `--help` on any script.
 
 ## Licence
 

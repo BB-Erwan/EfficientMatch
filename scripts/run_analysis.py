@@ -3,7 +3,7 @@ project: full comparison table, comparison "at equivalent accuracy" against an i
 and "corrected time" (raw time minus evaluation overhead). Reads metrics JSON files directly --
 no training code involved, safe to run alongside an active run.
 
-Eval-time-per-call and FLOPs/iteration constants below come from `FLOPS_RESULTS.md` (in-situ
+Eval-time-per-call and FLOPs/iteration constants below come from `docs/flops.md` (in-situ
 measurements via scripts/ghost_method.py, and scripts/flops_analysis.py) -- update both places if
 either changes.
 
@@ -34,7 +34,7 @@ import json
 import os
 import re
 
-# GFLOPs per training iteration, keyed by widen_factor then by method name. See FLOPS_RESULTS.md.
+# GFLOPs per training iteration, keyed by widen_factor then by method name. See docs/flops.md.
 GFLOPS_PER_IT = {
     2: {
         "fixmatch": 850.10, "flexmatch": 850.10, "mixmatch": 301.64,

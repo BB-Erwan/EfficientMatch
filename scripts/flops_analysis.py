@@ -12,7 +12,7 @@ seules les formes des tenseurs (batch, canaux, résolution) et l'architecture du
 Usage :
     python flops_analysis.py
     python flops_analysis.py --methods fixmatch efficientmatch
-    python flops_analysis.py --out flops_metrics.json --md ../FLOPS_RESULTS.md
+    python flops_analysis.py --out flops_metrics.json --md ../docs/flops.md
 """
 import argparse
 import json
