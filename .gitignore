@@ -187,3 +187,6 @@ cython_debug/
 
 # Legacy log format (superseded by results/)
 logs/
+
+# Runs from the notebooks (RUN_TAG = "notebook"): personal, never part of the paper
+results/**/*_notebook_metrics.json

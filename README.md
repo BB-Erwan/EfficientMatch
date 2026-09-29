@@ -68,6 +68,15 @@ To dispatch the runs yourself rather than from here, `python run_experiment.py -
 them as plain command lines; the same list is written out in
 [docs/reproducing.md](docs/reproducing.md).
 
+## Notebooks
+
+To read a method or change it, [`notebooks/`](notebooks/) holds one notebook per method and one for
+the figures. Each method notebook writes out everything the method does (data split,
+augmentations, losses, training loop, evaluation) in commented cells, runs a 1,000-iteration test
+by default, and is the same computation as its script at the default settings. `figures.ipynb`
+draws Figures 1 to 5 from `results/` and plots any other run, without a GPU. See
+[notebooks/README.md](notebooks/README.md).
+
 ## Results
 
 Wall-clock minutes to reach the target accuracy, corrected for evaluation cost, per seed. `†` marks
@@ -123,6 +132,7 @@ scripts/
   best_method_by_threshold.py                               Regenerates docs/threshold_sensitivity.md
   plot_acc_vs_time.py  plot_acc_vs_pl.py  plot_ablation_mixw*.py    Figures
 
+notebooks/               The same methods, cell by cell, to read and modify; and the figures
 results/                 One JSON per run, see results/README.md
 figures/                 Every figure in the paper
 docs/                    Detailed results, organised by paper section
