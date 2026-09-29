@@ -1,5 +1,5 @@
 """WideResNet, architecture standard FixMatch (Oliver et al. protocol).
-DenseNet-BC pour CIFAR (Huang et al., 2016), adaptée pour images 32x32."""
+DenseNet-BC for CIFAR (Huang et al., 2016), adapted to 32x32 images."""
 import math
 import torch
 import torch.nn as nn
@@ -95,7 +95,7 @@ class TransitionLayer(nn.Module):
 class DenseNetCIFAR(nn.Module):
     def __init__(self, depth=100, growth_rate=12, reduction=0.5, num_classes=100):
         super().__init__()
-        assert (depth - 4) % 6 == 0, "depth doit vérifier (depth-4) % 6 == 0 pour DenseNet-BC"
+        assert (depth - 4) % 6 == 0, "DenseNet-BC requires (depth - 4) % 6 == 0"
         n_layers_per_block = (depth - 4) // 6
 
         num_channels = 2 * growth_rate
@@ -145,13 +145,13 @@ class DenseNetCIFAR(nn.Module):
 
 
 def densenet_bc_100_12(num_classes=100):
-    """Config du papier original (L=100, k=12), ~0.8M paramètres."""
+    """The original paper's configuration (L=100, k=12), about 0.8M parameters."""
     return DenseNetCIFAR(depth=100, growth_rate=12, reduction=0.5, num_classes=num_classes)
 
 
 def build_model(model_name, num_classes, widen_factor=2, depth=28):
-    """Factory commune aux scripts d'expérience : instancie le backbone choisi via --model.
-    depth ne s'applique qu'à wideresnet (ex: 28 pour WRN-28-x, 40 pour WRN-40-x)."""
+    """Build the backbone selected with --model. `depth` applies to wideresnet only
+    (28 for WRN-28-x, 40 for WRN-40-x) and is ignored otherwise."""
     if model_name == "wideresnet":
         return WideResNet(depth=depth, widen_factor=widen_factor, num_classes=num_classes)
     elif model_name == "resnet18":

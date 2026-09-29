@@ -62,6 +62,10 @@ python make_figures.py               # draw whatever is missing from figures/
 `freematch-noclamp` or `asymptotic`, and `--config`, `--method` and `--seed` narrow it further. The
 main sweep is 60 runs of up to two hours each, so start with `--dry-run`.
 
+To dispatch the runs yourself rather than from here, `python run_experiment.py --commands` prints
+them as plain command lines; the same list is written out in
+[docs/reproducing.md](docs/reproducing.md).
+
 ## Results
 
 Wall-clock minutes to reach the target accuracy, corrected for evaluation cost, per seed. `†` marks
@@ -90,6 +94,7 @@ and more FLOP-costly, because each of its iterations is much more expensive.
 | [docs/fast_fixmatch.md](docs/fast_fixmatch.md) | Why Fast FixMatch's FLOP gain does not become a wall-clock gain here (Table 9, Appendix A.4) |
 | [docs/asymptotic.md](docs/asymptotic.md) | What happens with no accuracy target at all (Table 11, Appendix A.8) |
 | [docs/flops.md](docs/flops.md) | FLOPs per iteration for every method, and the cost of one evaluation (Appendix B) |
+| [docs/reproducing.md](docs/reproducing.md) | Every run behind the paper, as a plain list of commands |
 | [results/README.md](results/README.md) | How result files are named and which ones the paper uses |
 
 ## Repository layout
@@ -99,12 +104,16 @@ run_experiment.py        Run any experiment in the paper
 make_figures.py          Redraw any figure in the paper
 
 scripts/
-  efficientmatch.py      The method of the paper
+  efficientmatch.py      The method of the paper. Its ablations are options on it:
+                         --mixing_target (Table 8), --mixup_weight (Table 7),
+                         --mu (Tables 5, 6), --freematch_threshold (Table 4)
   fixmatch.py  flexmatch.py  mixmatch.py  regmixmatch.py    The four baselines
   fast_fixmatch.py       Curriculum batch size, measured separately (Appendix A.4)
-  efficientmatch_hard.py  efficientmatch_soft.py            Mixing-target ablation (Appendix A.3)
 
-  models.py  ema.py  utils.py  datasets_utils.py            Shared by every method
+  common/                Everything identical across methods: the shared options,
+                         the dataset split and augmentations, the model and
+                         optimiser, the metrics and the periodic evaluation
+  models.py  ema.py  utils.py  datasets_utils.py            Architecture and helpers
 
   run_analysis.py        Compare methods on one configuration, from the result files
   flops_analysis.py      FLOPs per iteration, on dummy tensors

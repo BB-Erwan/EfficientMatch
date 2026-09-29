@@ -145,7 +145,7 @@ def main():
         v2.ToDtype(torch.float32, scale=True), v2.Normalize(mean, std),
     ])
 
-    print("Chargement du pool CIFAR-10 (images réelles, tirées avec remise)...")
+    print("Loading the CIFAR-10 pool (real images, sampled with replacement)...")
     labeled_imgs, labeled_labels = load_cifar10_pool(args.batch_size_l * 4, seed=args.seed)
     unlabeled_imgs, _ = load_cifar10_pool(args.pool_size, seed=args.seed + 1)
 

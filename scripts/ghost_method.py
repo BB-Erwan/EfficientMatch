@@ -161,7 +161,7 @@ def run_ghost():
         try:
             import triton  # noqa: F401
             model = torch.compile(model, mode="reduce-overhead")
-            logger.info("torch.compile activé (mode=reduce-overhead)")
+            logger.info("torch.compile active (mode=reduce-overhead)")
         except ImportError:
             pass
 

@@ -1,15 +1,16 @@
-"""Mesure le nombre de FLOPs par itération (forward + backward) de chaque méthode SSL de
-`scripts/` (fixmatch, flexmatch, mixmatch, efficientmatch, regmixmatch), sur des tenseurs
-factices (dummy tensors) de la bonne forme -- pas de CIFAR-10, pas de dataloader, pas de run
-réel. Chaque fonction `<methode>_iter_flops` reproduit fidèlement la séquence d'appels au modèle
-(nombre de forward, tailles de batch, no_grad éventuel) telle qu'elle apparaît dans
-`scripts/<methode>.py`, afin que le résultat reflète le coût de calcul réel d'une itération et
-pas une approximation.
+"""FLOPs per training iteration (forward + backward) for every method in scripts/.
 
-Les FLOPs sont indépendants des données, de `--optimized`/`--amp`/`torch.compile` et du device :
-seules les formes des tenseurs (batch, canaux, résolution) et l'architecture du modèle comptent.
+Measured on dummy tensors of the right shape: no CIFAR-10, no dataloader, no real run. Each
+`<method>_iter_flops` reproduces exactly the sequence of model calls its training script makes --
+how many forward passes, at what batch sizes, under no_grad or not -- so the number is the real
+per-iteration cost rather than an estimate.
 
-Usage :
+FLOPs depend only on tensor shapes and on the architecture: they are independent of the data, of
+--optimized, of mixed precision, of torch.compile and of the device. That is what makes them the
+one metric of this work comparable across machines, and it is why they are reported alongside
+wall-clock time rather than instead of it (see docs/flops.md).
+
+Usage:
     python flops_analysis.py
     python flops_analysis.py --methods fixmatch efficientmatch
     python flops_analysis.py --out flops_metrics.json --md ../docs/flops.md
@@ -31,8 +32,7 @@ NUM_CLASSES = 10
 IMAGE_SIZE = 32
 BATCH_SIZE_L = 64
 
-# mu (ratio non labellisé / labellisé) et nombre de vues non labellisées par méthode, tels que
-# codés en dur dans chaque script d'entraînement.
+# Unlabeled:labeled ratio per method, as hardcoded in each training script.
 MU = {
     "fixmatch": 7,
     "flexmatch": 7,
@@ -67,7 +67,7 @@ def _dummy_labels(n, device):
 
 
 def fixmatch_iter_flops(model, device):
-    """1 forward no_grad (pseudo-labels, mu*B) + 1 forward+backward fusionné (B + mu*B)."""
+    """1 no-grad forward for the pseudo-labels (mu*B), then 1 fused forward+backward (B + mu*B)."""
     B, muB = BATCH_SIZE_L, MU["fixmatch"] * BATCH_SIZE_L
     x_l, y_l = _dummy_images(B, device), _dummy_labels(B, device)
     x_u_w, x_u_s = _dummy_images(muB, device), _dummy_images(muB, device)
@@ -90,14 +90,14 @@ def fixmatch_iter_flops(model, device):
 
 
 def flexmatch_iter_flops(model, device):
-    """Même séquence d'appels au modèle que FixMatch (le seuillage par classe ne change ni le
-    nombre de forwards, ni les tailles de batch)."""
+    """Same sequence of model calls as FixMatch: per-class thresholding changes neither the number
+    of forward passes nor the batch sizes."""
     return fixmatch_iter_flops(model, device)
 
 
 def mixmatch_iter_flops(model, device):
-    """1 forward no_grad sur la paire de vues faibles (2*mu*B) + 1 forward+backward sur le
-    mélange mixup (B + 2*mu*B)."""
+    """1 no-grad forward over the pair of weak views (2*mu*B), then 1 forward+backward over the
+    mixed batch (B + 2*mu*B)."""
     B, muB = BATCH_SIZE_L, MU["mixmatch"] * BATCH_SIZE_L
     x_l, y_l = _dummy_images(B, device), _dummy_labels(B, device)
     x_u_w_1, x_u_w_2 = _dummy_images(muB, device), _dummy_images(muB, device)
@@ -267,13 +267,13 @@ def main():
     parser.add_argument("--widen-factor", type=int, default=2)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--K", type=int, default=None,
-                         help="si fourni, affiche aussi les FLOPs totaux extrapolés sur K itérations")
-    parser.add_argument("--out", type=str, default=None, help="chemin du JSON récapitulatif")
-    parser.add_argument("--md", type=str, default=None, help="chemin du document Markdown récapitulatif")
+                         help="also report the total FLOPs extrapolated over K iterations")
+    parser.add_argument("--out", type=str, default=None, help="path of the JSON summary to write")
+    parser.add_argument("--md", type=str, default=None, help="path of the Markdown summary to write")
     args = parser.parse_args()
 
     device = torch.device(args.device)
-    print(f"Device: {device} | WideResNet-{args.depth}-{args.widen_factor} | batch labellisé={BATCH_SIZE_L}")
+    print(f"Device: {device} | WideResNet-{args.depth}-{args.widen_factor} | labeled batch={BATCH_SIZE_L}")
 
     results = {}
     for name in args.methods:
@@ -287,7 +287,7 @@ def main():
             line += f"  ->  {flops * args.K:.3e} FLOPs sur K={args.K}"
         print(line)
 
-    header = f"{'Méthode':<16}{'mu':>4}{'Batch non labellisé':>22}{'FLOPs/it':>16}{'GFLOPs/it':>14}"
+    header = f"{'Method':<16}{'mu':>4}{'Unlabeled batch':>22}{'FLOPs/it':>16}{'GFLOPs/it':>14}"
     print("\n" + header)
     print("-" * len(header))
     for name, r in results.items():
@@ -296,27 +296,27 @@ def main():
 
     if args.out:
         Path(args.out).write_text(json.dumps(results, indent=4), encoding="utf-8")
-        print(f"\nRésumé JSON écrit dans {args.out}")
+        print(f"\nJSON summary written to {args.out}")
 
     if args.md:
         write_markdown(args.md, args, device, results)
-        print(f"Résumé Markdown écrit dans {args.md}")
+        print(f"Markdown summary written to {args.md}")
 
 
 def write_markdown(out_path, args, device, results):
     lines = [
-        "# Résultats de l'analyse FLOPs par itération",
+        "# FLOPs per training iteration",
         "",
-        f"Mesures réalisées via `scripts/flops_analysis.py` sur {device} "
+        f"Measured with `scripts/flops_analysis.py` on {device} "
         f"(`torch=={torch.__version__}`, Python {platform.python_version()}), avec "
         f"`torch.utils.flop_counter.FlopCounterMode` sur des tenseurs factices (dummy tensors) -- "
-        f"indépendant des données, de `--optimized`/`--amp`/`torch.compile`.",
+        f"independent of the data, of --optimized, of mixed precision and of torch.compile.",
         "",
-        f"Modèle : WideResNet-{args.depth}-{args.widen_factor} ; batch labellisé = {BATCH_SIZE_L}.",
+        f"Model: WideResNet-{args.depth}-{args.widen_factor}; labeled batch = {BATCH_SIZE_L}.",
         "",
-        "## Résultats",
+        "## Results",
         "",
-        "| Méthode | mu | Batch non labellisé | FLOPs / itération | GFLOPs / itération |",
+        "| Method | mu | Unlabeled batch | FLOPs / iteration | GFLOPs / iteration |",
         "|---|---:|---:|---:|---:|",
     ]
     for name, r in results.items():

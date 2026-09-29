@@ -5,7 +5,8 @@ from sklearn.metrics import accuracy_score, f1_score
 
 
 class FixMatchCosineLR:
-    """lr(k) = lr0 * cos(7*pi*k / (16*K)), schedule cosine recalé standard FixMatch/EfficientMatch."""
+    """lr(k) = lr0 * cos(7*pi*k / (16*K)): the rescaled cosine schedule FixMatch introduced, which
+    every method here uses so that the learning rate is never a source of difference between them."""
 
     def __init__(self, optimizer, total_steps, base_lr=None):
         self.optimizer = optimizer

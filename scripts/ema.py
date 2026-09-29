@@ -1,4 +1,4 @@
-"""Exponential Moving Average des poids du modèle, utilisée pour l'évaluation."""
+"""Exponential moving average of the model weights, which is what gets evaluated."""
 import torch
 
 
@@ -14,7 +14,7 @@ class EMA:
             if v.dtype.is_floating_point:
                 v.mul_(self.decay).add_(state[k].detach(), alpha=1 - self.decay)
             else:
-                v.copy_(state[k].detach())  # ex. num_batches_tracked : compteur entier, pas de moyenne
+                v.copy_(state[k].detach())  # e.g. num_batches_tracked: an integer counter, not something to average
 
     def copy_to(self, model):
         model.load_state_dict(self.shadow, strict=True)
