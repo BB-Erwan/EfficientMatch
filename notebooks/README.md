@@ -64,3 +64,7 @@ The notebooks leave out the variants that no paper table needs from them: the Fl
 FreeMatch-style thresholds of `efficientmatch.py` (Table 4 runs them from the script) and
 RegMixMatch's class-aware ResizeMix branch, which no run of the paper uses. Both remain in
 `scripts/`.
+
+The implementation details that the notebooks make visible (augmentations drawn per batch,
+MixMatch's supervised term, RegMixMatch's warmup) are collected in
+[docs/implementation_notes.md](../docs/implementation_notes.md).

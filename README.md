@@ -16,6 +16,12 @@ Across the twelve seed/configuration combinations reported, EfficientMatch reach
 accuracy in less wall-clock time and fewer FLOPs than MixMatch, FixMatch, FlexMatch and RegMixMatch,
 without exception.
 
+There are three ways into the code: [`run_experiment.py`](run_experiment.py) and
+[`make_figures.py`](make_figures.py) reproduce every run and figure of the paper; the
+[notebooks](notebooks/) lay out each method cell by cell, to read and modify; and
+[docs/implementation_notes.md](docs/implementation_notes.md) lists the implementation details
+the paper does not show.
+
 ## Install
 
 ```bash
@@ -106,6 +112,8 @@ and more FLOP-costly, because each of its iterations is much more expensive.
 | [docs/asymptotic.md](docs/asymptotic.md) | What happens with no accuracy target at all (Table 11, Appendix A.8) |
 | [docs/flops.md](docs/flops.md) | FLOPs per iteration for every method, and the cost of one evaluation (Appendix B) |
 | [docs/reproducing.md](docs/reproducing.md) | Every run behind the paper, as a plain list of commands |
+| [docs/implementation_notes.md](docs/implementation_notes.md) | Implementation details the paper does not show: batch-level augmentation, MixMatch's supervised term, RegMixMatch's uncounted warmup, departures from reference code |
+| [notebooks/README.md](notebooks/README.md) | One notebook per method, to read and modify cell by cell, and one for Figures 1 to 5 |
 | [results/README.md](results/README.md) | How result files are named and which ones the paper uses |
 
 ## Repository layout
