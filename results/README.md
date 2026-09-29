@@ -21,6 +21,7 @@ the variant that produced it:
 | `_freematch` | EfficientMatch with FreeMatch's self-adaptive thresholding instead of a fixed tau |
 | `_noclamp` | adaptive threshold left unclamped on SVHN |
 | `_unlimited` | run with no accuracy target and no time budget, to the full 2^20-iteration horizon |
+| `_<tag>` | free label given with `--tag`, last in the name; use one to keep your own runs from overwriting the paper's files |
 
 Each file holds one array per metric, with one entry per evaluation: `step`, `test_acc`, `test_f1`,
 `train_loss`, `time_elapsed` (seconds since the first training step), `pl_quality` (fraction of
