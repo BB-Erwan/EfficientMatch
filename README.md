@@ -158,33 +158,45 @@ and more FLOP-costly, because each of its iterations is much more expensive.
 
 ## Repository layout
 
-```
-run_experiment.py        Run any experiment in the paper
-make_figures.py          Redraw any figure in the paper, and the ones in these READMEs
+**Entry points**
 
-scripts/
-  efficientmatch.py      The method of the paper. Its ablations are options on it:
-                         --mixing_target (Table 8), --mixup_weight (Table 7),
-                         --mu (Tables 5, 6), --freematch_threshold (Table 4)
-  fixmatch.py  flexmatch.py  mixmatch.py  regmixmatch.py    The four baselines
-  fast_fixmatch.py       Curriculum batch size, measured separately (Appendix A.4)
+| File | What it does |
+|---|---|
+| [`run_experiment.py`](run_experiment.py) | Run any experiment of the paper, or list and check them |
+| [`make_figures.py`](make_figures.py) | Redraw any figure of the paper, and the ones in these READMEs |
 
-  common/                Everything identical across methods: the shared options,
-                         the dataset split and augmentations, the model and
-                         optimiser, the metrics and the periodic evaluation
-  models.py  ema.py  utils.py  datasets_utils.py            Architecture and helpers
+**Methods**, each as a script and as a notebook
 
-  run_analysis.py        Compare methods on one configuration, from the result files
-  flops_analysis.py      FLOPs per iteration, on dummy tensors
-  measure_eval_time.py  ghost_method.py                     Cost of one evaluation pass
-  best_method_by_threshold.py                               Regenerates docs/threshold_sensitivity.md
-  plot_acc_vs_time.py  plot_acc_vs_pl.py  plot_ablation_mixw*.py    Figures
+| Script | Notebook | What it is |
+|---|---|---|
+| [`efficientmatch.py`](scripts/efficientmatch.py) | [`efficientmatch.ipynb`](notebooks/efficientmatch.ipynb) | The method of the paper. Its ablations are options: `--mu` (Tables 5, 6), `--mixup_weight` (Table 7), `--mixing_target` (Table 8), `--freematch_threshold` (Table 4) |
+| [`fixmatch.py`](scripts/fixmatch.py) | [`fixmatch.ipynb`](notebooks/fixmatch.ipynb) | Baseline: confidence-filtered consistency |
+| [`flexmatch.py`](scripts/flexmatch.py) | [`flexmatch.ipynb`](notebooks/flexmatch.ipynb) | Baseline: per-class adaptive threshold |
+| [`mixmatch.py`](scripts/mixmatch.py) | [`mixmatch.ipynb`](notebooks/mixmatch.ipynb) | Baseline: Mixup without filtering |
+| [`regmixmatch.py`](scripts/regmixmatch.py) | [`regmixmatch.ipynb`](notebooks/regmixmatch.ipynb) | Baseline: adaptive threshold and confidence-routed ResizeMix |
+| [`fast_fixmatch.py`](scripts/fast_fixmatch.py) | | Curriculum batch size, measured separately (Appendix A.4) |
 
-notebooks/               The same methods, cell by cell, to read and modify; and the figures
-results/                 One JSON per run, see results/README.md
-figures/                 Every figure in the paper
-docs/                    Detailed results, organised by paper section
-```
+**Shared code and analysis tools**, in [`scripts/`](scripts/)
+
+| File | What it does |
+|---|---|
+| [`common/`](scripts/common/) | Everything identical across methods: shared options, dataset split and augmentations, model and optimiser, metrics and periodic evaluation |
+| [`models.py`](scripts/models.py), [`ema.py`](scripts/ema.py), [`utils.py`](scripts/utils.py), [`datasets_utils.py`](scripts/datasets_utils.py) | Architecture and helpers |
+| [`run_analysis.py`](scripts/run_analysis.py) | Compare methods on one configuration, from the result files |
+| [`flops_analysis.py`](scripts/flops_analysis.py) | FLOPs per iteration of every method, on dummy tensors |
+| [`measure_eval_time.py`](scripts/measure_eval_time.py), [`ghost_method.py`](scripts/ghost_method.py) | Cost of one evaluation pass, subtracted from wall-clock time |
+| [`benchmark_fast_fixmatch.py`](scripts/benchmark_fast_fixmatch.py) | FixMatch against Fast FixMatch, time per iteration (Table 9) |
+| [`best_method_by_threshold.py`](scripts/best_method_by_threshold.py) | Regenerates [`docs/threshold_sensitivity.md`](docs/threshold_sensitivity.md) |
+| `plot_*.py` | The figures, called by `make_figures.py` |
+
+**Folders**
+
+| Folder | Contents |
+|---|---|
+| [`notebooks/`](notebooks/) | The methods cell by cell, to read and modify, and the figures |
+| [`results/`](results/) | One JSON file per run ([naming and scope](results/README.md)) |
+| [`figures/`](figures/) | Every figure of the paper and of these READMEs |
+| [`docs/`](docs/) | Detailed results, organised by paper section |
 
 Each method is a **standalone script**: its training loop, augmentations and hyperparameters all
 live in one file, and only what is identical across methods by construction — the architecture, the
