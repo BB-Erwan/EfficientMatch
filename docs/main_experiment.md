@@ -65,6 +65,16 @@ evaluation pass for WRN-28-2, 1499.1 ms for WRN-28-4.
 | MixMatch | 6.5 | 17.4 | 11.8 | † | † | † | 55.5 | 59.6 | 46.3 | † | † | † |
 | RegMixMatch | 10.2 | 8.2 | 11.2 | 60.6 | 43.8 | 36.1 | 42.9 | 46.2 | 47.2 | 61.0 | 52.5 | 70.1 |
 
+Accuracy against time, all five methods, seed 2312, one panel per configuration (Figure 4 of the
+paper). Dashed lines mark the target.
+
+<p align="center">
+  <img src="../figures/all_methods_acc_vs_time_svhn_250_seed2312.png" width="24%">
+  <img src="../figures/all_methods_acc_vs_time_cifar10_250_seed2312.png" width="24%">
+  <img src="../figures/all_methods_acc_vs_time_cifar10_4000_seed2312.png" width="24%">
+  <img src="../figures/all_methods_acc_vs_time_cifar100_2500_seed2312.png" width="24%">
+</p>
+
 ## FLOPs to reach the target (PFLOPs)
 
 | Method | SVHN-250 | | | CIFAR-10-250 | | | CIFAR-10-4000 | | | CIFAR-100-2500 | | |
@@ -120,6 +130,18 @@ budget, when the pseudo-labels available early in training are scarce and unreli
 per iteration across the four configurations; yet when evaluated in terms of compute time and FLOPs,
 the ranking changes entirely depending on the configuration.
 
+<p align="center">
+  <img src="../figures/all_methods_acc_vs_steps_cifar10_250_seed2701.png" width="32%">
+  <img src="../figures/all_methods_acc_vs_time_cifar10_250_seed2701.png" width="32%">
+  <img src="../figures/all_methods_acc_vs_flops_cifar10_250_seed2701.png" width="32%">
+</p>
+
+*Figure 2 of the paper: convergence on CIFAR-10/250, seed 2701, along the three criteria:
+iterations (left), time (middle), and FLOPs (right). The three criteria rank methods differently.
+RegMixMatch appears highly efficient per iteration, whereas EfficientMatch is more efficient on the
+other two criteria, except early in training, where MixMatch dominates before reaching its
+plateau.*
+
 **Slow-convergence failures.** The configurations reveal several methodological limitations, of
 different nature depending on the method. The simplest configuration, CIFAR-10/4000, allows every
 method to converge within the allowed time, unlike the other three. On SVHN/250, FlexMatch's
@@ -130,6 +152,16 @@ this dataset. On CIFAR-10/250, by contrast, MixMatch fails by slowness rather th
 too slow to cross it within the two-hour budget on every seed. CIFAR-100/2500 reproduces this same
 speed failure for MixMatch, and also causes FixMatch to fail for the same reason, both plateauing at
 45-48%.
+
+**Inter-seed variability.** The same configuration, CIFAR-10/250, on its three seeds (Figure 5 of
+the paper). Both the ranking and the qualitative behaviour of each method change substantially from
+seed to seed, which is why the paper reports no averaged performance.
+
+<p align="center">
+  <img src="../figures/all_methods_acc_vs_time_cifar10_250_seed2312.png" width="32%">
+  <img src="../figures/all_methods_acc_vs_time_cifar10_250_seed308.png" width="32%">
+  <img src="../figures/all_methods_acc_vs_time_cifar10_250_seed2701.png" width="32%">
+</p>
 
 ## The FreeMatch-thresholding variant (Table 4)
 

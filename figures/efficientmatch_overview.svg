@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 440" width="980" height="440" font-family="Georgia, 'Times New Roman', serif" font-size="14">
+  <title>EfficientMatch: FixMatch's losses plus a Mixup channel filtered by the same confidence mask</title>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#777"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1f77b4"/>
+    </marker>
+    <style>
+      .box   { fill: #f4f4f4; stroke: #9a9a9a; stroke-width: 1.2; }
+      .new   { fill: #e7f0f9; stroke: #1f77b4; stroke-width: 1.6; }
+      .ink   { fill: #222; }
+      .blue  { fill: #1f5f99; }
+      .muted { fill: #6b6b6b; font-size: 12px; }
+      .edge  { stroke: #777; stroke-width: 1.4; fill: none; marker-end: url(#arrow); }
+      .edge-new { stroke: #1f77b4; stroke-width: 1.6; fill: none; marker-end: url(#arrow-blue); }
+      .dashed { stroke-dasharray: 5 4; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="980" height="440" rx="14" fill="#ffffff"/>
+
+  <!-- Column headers -->
+  <text x="95" y="24" text-anchor="middle" class="muted">input</text>
+  <text x="275" y="24" text-anchor="middle" class="muted">augmentation</text>
+  <text x="440" y="24" text-anchor="middle" class="muted">network</text>
+  <text x="630" y="24" text-anchor="middle" class="muted">pseudo-labels</text>
+  <text x="860" y="24" text-anchor="middle" class="muted">losses</text>
+
+  <!-- Labeled branch -->
+  <rect x="20" y="40" width="150" height="40" rx="6" class="box"/>
+  <text x="95" y="65" text-anchor="middle" class="ink">labeled batch X</text>
+  <rect x="200" y="40" width="150" height="40" rx="6" class="box"/>
+  <text x="275" y="65" text-anchor="middle" class="ink">weak view</text>
+  <rect x="380" y="40" width="120" height="40" rx="6" class="box"/>
+  <text x="440" y="65" text-anchor="middle" class="ink">model</text>
+  <rect x="760" y="40" width="200" height="40" rx="6" class="box"/>
+  <text x="860" y="65" text-anchor="middle" class="ink">L<tspan baseline-shift="sub" font-size="10">s</tspan> = CE(y, ·)</text>
+  <path d="M170,60 H198" class="edge"/>
+  <path d="M350,60 H378" class="edge"/>
+  <path d="M500,60 H758" class="edge"/>
+
+  <!-- Unlabeled batch -->
+  <rect x="20" y="120" width="150" height="120" rx="6" class="box"/>
+  <text x="95" y="176" text-anchor="middle" class="ink">unlabeled</text>
+  <text x="95" y="194" text-anchor="middle" class="ink">batch U</text>
+  <path d="M170,140 H198" class="edge"/>
+  <path d="M170,220 H198" class="edge"/>
+
+  <!-- Weak view: pseudo-labels and mask -->
+  <rect x="200" y="120" width="150" height="40" rx="6" class="box"/>
+  <text x="275" y="145" text-anchor="middle" class="ink">weak view U<tspan baseline-shift="sub" font-size="10">w</tspan></text>
+  <rect x="380" y="120" width="120" height="40" rx="6" class="box"/>
+  <text x="440" y="145" text-anchor="middle" class="ink">model, no grad</text>
+  <rect x="530" y="112" width="200" height="56" rx="6" class="box"/>
+  <text x="630" y="135" text-anchor="middle" class="ink">pseudo-label ŷ, confidence p</text>
+  <text x="630" y="156" text-anchor="middle" class="ink">mask m = 1[p ≥ τ]</text>
+  <path d="M350,140 H378" class="edge"/>
+  <path d="M500,140 H528" class="edge"/>
+
+  <!-- Strong view: consistency loss -->
+  <rect x="200" y="200" width="150" height="40" rx="6" class="box"/>
+  <text x="275" y="225" text-anchor="middle" class="ink">strong view U<tspan baseline-shift="sub" font-size="10">s</tspan></text>
+  <rect x="380" y="200" width="120" height="40" rx="6" class="box"/>
+  <text x="440" y="225" text-anchor="middle" class="ink">model</text>
+  <rect x="760" y="200" width="200" height="40" rx="6" class="box"/>
+  <text x="860" y="225" text-anchor="middle" class="ink">L<tspan baseline-shift="sub" font-size="10">u</tspan> = m · CE(ŷ, ·)</text>
+  <path d="M350,220 H378" class="edge"/>
+  <path d="M500,220 H758" class="edge"/>
+  <path d="M730,140 H860 V198" class="edge"/>
+
+  <!-- Mixup channel: the contribution -->
+  <rect x="20" y="300" width="330" height="56" rx="6" class="new"/>
+  <text x="185" y="323" text-anchor="middle" class="blue">mix every image of X ∪ U<tspan baseline-shift="sub" font-size="10">w</tspan></text>
+  <text x="185" y="344" text-anchor="middle" class="blue">with a shuffled partner, λ ≥ 0.5</text>
+  <rect x="380" y="308" width="120" height="40" rx="6" class="new"/>
+  <text x="440" y="333" text-anchor="middle" class="blue">model</text>
+  <rect x="760" y="300" width="200" height="56" rx="6" class="new"/>
+  <text x="860" y="323" text-anchor="middle" class="blue">L<tspan baseline-shift="sub" font-size="10">mix</tspan> = m<tspan baseline-shift="sub" font-size="10">partner</tspan> · CE(ỹ, ·)</text>
+  <text x="860" y="344" text-anchor="middle" class="blue" font-size="12">only if the partner is confident</text>
+  <path d="M350,328 H378" class="edge-new"/>
+  <path d="M500,328 H758" class="edge-new"/>
+  <path d="M640,168 V272 H880 V298" class="edge-new dashed"/>
+  <text x="652" y="265" class="blue" font-size="12">the same mask, reused: no new threshold</text>
+
+  <!-- Total loss and legend -->
+  <text x="490" y="396" text-anchor="middle" class="ink" font-size="16">L = L<tspan baseline-shift="sub" font-size="11">s</tspan> + L<tspan baseline-shift="sub" font-size="11">u</tspan><tspan class="blue"> + λ<tspan baseline-shift="sub" font-size="11">mix</tspan> L<tspan baseline-shift="sub" font-size="11">mix</tspan></tspan></text>
+  <rect x="300" y="414" width="14" height="12" rx="2" class="box"/>
+  <text x="320" y="425" class="muted">FixMatch</text>
+  <rect x="400" y="414" width="14" height="12" rx="2" class="new"/>
+  <text x="420" y="425" class="muted">added by EfficientMatch</text>
+</svg>

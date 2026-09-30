@@ -48,7 +48,7 @@ quality one.
 `lambda_mix` scales the Mixup term in the total loss. A value near 0 pushes EfficientMatch towards a
 FixMatch with mu = 3, while a value much greater than 1 overweights the mixing term and brings it
 closer to standard MixMatch behaviour, with a larger gap between pseudo-label quality and model
-accuracy and faster convergence early in training (see `figures/ablation_mixw*`).
+accuracy and faster convergence early in training (see the figure below).
 
 **CIFAR-10, 250 labels, target 80%**
 
@@ -61,6 +61,15 @@ accuracy and faster convergence early in training (see `figures/ablation_mixw*`)
 
 The default is best in both time and FLOPs on all three seeds. The degradation is roughly symmetric
 around it, and heavier on the under-weighted side.
+
+<p align="center">
+  <img src="../figures/ablation_mixw_acc_vs_steps_cifar10_250_seed2312.png" width="32%">
+  <img src="../figures/ablation_mixw0.5_acc_vs_pl_cifar10_250_seed2312.png" width="32%">
+  <img src="../figures/ablation_mixw2_acc_vs_pl_cifar10_250_seed2312.png" width="32%">
+</p>
+
+*Figure 3 of the paper, seed 2312: accuracy for the three Mixup weights (left), then pseudo-label
+quality against model accuracy for lambda_mix = 0.5 (middle) and lambda_mix = 2 (right).*
 
 ## A.3 — What the Mixup channel is trained against (Table 8)
 

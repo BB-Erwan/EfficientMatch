@@ -1,5 +1,12 @@
 # EfficientMatch: Faster Convergence in Semi-Supervised Learning
 
+<p align="center">
+  <img alt="Python 3.11" src="https://img.shields.io/badge/python-3.11-3776AB?logo=python&logoColor=white">
+  <img alt="PyTorch 2.1+" src="https://img.shields.io/badge/PyTorch-2.1%2B-EE4C2C?logo=pytorch&logoColor=white">
+  <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-2ca02c">
+  <img alt="Runs: 118 reproducible" src="https://img.shields.io/badge/paper%20runs-118%2F118%20on%20disk-1f77b4">
+</p>
+
 Code and results for the paper, included here as [`paper.pdf`](paper.pdf).
 
 Semi-supervised learning is usually evaluated on the accuracy a method eventually reaches, after a
@@ -12,9 +19,28 @@ confidence mask the consistency loss has already computed, so no new threshold i
 whole contribution is the ~40 lines building `loss_mixup` in
 [`scripts/efficientmatch.py`](scripts/efficientmatch.py).
 
+<p align="center">
+  <img src="figures/efficientmatch_overview.svg" width="92%" alt="EfficientMatch: FixMatch's two losses plus a Mixup channel filtered by the same confidence mask">
+</p>
+
+The idea comes from what the two parent methods do to the pseudo-labels they train on. FixMatch's
+accuracy tracks the quality of the pseudo-labels it keeps; MixMatch's model overtakes the quality of
+its own pseudo-labels. EfficientMatch keeps both properties (Figure 1 of the paper, CIFAR-10/250,
+seed 2701):
+
+<p align="center">
+  <img src="figures/fixmatch_acc_vs_pl_cifar10_250_seed2701.png" width="32%">
+  <img src="figures/mixmatch_acc_vs_pl_cifar10_250_seed2701.png" width="32%">
+  <img src="figures/efficientmatch_acc_vs_pl_cifar10_250_seed2701.png" width="32%">
+</p>
+
 Across the twelve seed/configuration combinations reported, EfficientMatch reaches the target
 accuracy in less wall-clock time and fewer FLOPs than MixMatch, FixMatch, FlexMatch and RegMixMatch,
 without exception.
+
+<p align="center">
+  <img src="figures/summary_time_to_target.png" width="100%" alt="Minutes to reach the target accuracy, per method and configuration, over the three seeds">
+</p>
 
 There are three ways into the code: [`run_experiment.py`](run_experiment.py) and
 [`make_figures.py`](make_figures.py) reproduce every run and figure of the paper; the
@@ -83,6 +109,10 @@ by default, and is the same computation as its script at the default settings. `
 draws Figures 1 to 5 from `results/` and plots any other run, without a GPU. See
 [notebooks/README.md](notebooks/README.md).
 
+<p align="center">
+  <img src="figures/augmentation_views.png" width="80%" alt="Weak and strong views of eight unlabeled CIFAR-10 images, as drawn in the notebooks">
+</p>
+
 ## Results
 
 Wall-clock minutes to reach the target accuracy, corrected for evaluation cost, per seed. `†` marks
@@ -95,6 +125,16 @@ a method that never reached the target within the two-hour budget.
 | FlexMatch | † | 63.3 / 51.3 / 40.7 | 58.1 / 86.4 / 76.8 | 69.2 / 82.8 / 68.0 |
 | MixMatch | 6.5 / 17.4 / 11.8 | † | 55.5 / 59.6 / 46.3 | † |
 | RegMixMatch | 10.2 / 8.2 / 11.2 | 60.6 / 43.8 / 36.1 | 42.9 / 46.2 / 47.2 | 61.0 / 52.5 / 70.1 |
+
+Accuracy against time on the four configurations, seed 2312 (Figure 4 of the paper; the dashed
+line is the target):
+
+<p align="center">
+  <img src="figures/all_methods_acc_vs_time_svhn_250_seed2312.png" width="24%">
+  <img src="figures/all_methods_acc_vs_time_cifar10_250_seed2312.png" width="24%">
+  <img src="figures/all_methods_acc_vs_time_cifar10_4000_seed2312.png" width="24%">
+  <img src="figures/all_methods_acc_vs_time_cifar100_2500_seed2312.png" width="24%">
+</p>
 
 Iterations and FLOPs, the two other metrics the paper reports, are in
 [`docs/main_experiment.md`](docs/main_experiment.md). They do not rank the methods the same way,
@@ -120,7 +160,7 @@ and more FLOP-costly, because each of its iterations is much more expensive.
 
 ```
 run_experiment.py        Run any experiment in the paper
-make_figures.py          Redraw any figure in the paper
+make_figures.py          Redraw any figure in the paper, and the ones in these READMEs
 
 scripts/
   efficientmatch.py      The method of the paper. Its ablations are options on it:

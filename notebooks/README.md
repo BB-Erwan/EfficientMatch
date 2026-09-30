@@ -2,6 +2,14 @@
 
 The same code as `scripts/`, laid out to be read and modified cell by cell.
 
+<p align="center">
+  <img src="../figures/augmentation_views.png" width="85%" alt="Weak and strong views of eight unlabeled images">
+</p>
+
+*Section 3 of every method notebook draws this: eight unlabeled CIFAR-10 images, their weak view
+(flip and crop) and their strong view (RandAugment, then flip and crop). The eight images form one
+batch, so they share one crop and one set of RandAugment operations, as in every run of the paper.*
+
 | Notebook | What it contains |
 |---|---|
 | [efficientmatch.ipynb](efficientmatch.ipynb) | The method of the paper: FixMatch's losses plus the confidence-filtered Mixup channel |

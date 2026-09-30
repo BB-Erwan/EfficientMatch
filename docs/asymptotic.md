@@ -29,6 +29,15 @@ three used elsewhere, because of the compute cost: each run needs more than 12 h
 was stopped after 12.5 hours with its cosine learning rate still far from annealing. Its asymptotic
 accuracy is therefore not established, and this comparison should be read as indicative only.
 
+<p align="center">
+  <img src="../figures/unlimited_efficientmatch_vs_regmixmatch_acc_vs_steps_cifar10_250_seed42.png" width="32%">
+  <img src="../figures/unlimited_efficientmatch_vs_regmixmatch_acc_vs_time_cifar10_250_seed42.png" width="32%">
+  <img src="../figures/unlimited_efficientmatch_vs_regmixmatch_acc_vs_flops_cifar10_250_seed42.png" width="32%">
+</p>
+
+*EfficientMatch and RegMixMatch without any target, CIFAR-10/250, seed 42, against iterations,
+time and FLOPs.*
+
 ## Savings at each accuracy milestone
 
 Absolute time and FLOPs EfficientMatch saves over RegMixMatch to first reach each level:
@@ -65,4 +74,4 @@ extracting more signal per iteration than EfficientMatch's mu = 3, at a proporti
 per-iteration cost. EfficientMatch's advantage comes from the cost of each step, not from a better
 gain per step — which is exactly the distinction the three-metric protocol is built to surface.
 
-Figures: `figures/unlimited_efficientmatch_vs_regmixmatch_acc_vs_{steps,time,flops}_cifar10_250_seed42.png`.
+The figures above are `figures/unlimited_efficientmatch_vs_regmixmatch_acc_vs_{steps,time,flops}_cifar10_250_seed42.png`.

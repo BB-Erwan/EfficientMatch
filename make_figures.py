@@ -107,6 +107,9 @@ def build_figures():
                   "--out", os.path.join(FIGURES,
                       f"unlimited_efficientmatch_vs_regmixmatch_acc_vs_{xaxis}_cifar10_250_seed42.png")]))
 
+    # The summary at the top of the README: minutes to target, every method, configuration and seed.
+    figs.append(dict(paper="README", name="summary_time_to_target.png", args=["plot_summary.py"]))
+
     # Deduplicate: Figure 2 and Figure 5 share the CIFAR-10/250 seed 2701 panel, and Figure 4
     # shares its CIFAR-10/250 panel with Figure 5 seed 2312.
     seen, unique = set(), []
@@ -127,7 +130,7 @@ def main():
     args = ap.parse_args()
 
     if args.figure:
-        wanted = args.figure if args.figure.lower().startswith(("figure", "table")) else f"Figure {args.figure}"
+        wanted = args.figure if args.figure.lower().startswith(("figure", "table", "readme")) else f"Figure {args.figure}"
         figs = [f for f in figs if f["paper"].lower() == wanted.lower()]
         if not figs:
             sys.exit(f"No figure matches {args.figure!r}.")
