@@ -13,6 +13,10 @@ p.add_argument("--ymin", type=float, default=50); p.add_argument("--ymax", type=
 p.add_argument("--overwrite", action="store_true")
 a = p.parse_args()
 
+# Method names as written in the paper (Figure 1 used the lowercase script names).
+DISPLAY = {"fixmatch": "FixMatch", "mixmatch": "MixMatch", "efficientmatch": "EfficientMatch",
+           "flexmatch": "FlexMatch", "regmixmatch": "RegMixMatch"}
+
 plt.rcParams.update({"font.family": "serif", "font.size": 11, "axes.titlesize": 12, "axes.labelsize": 12,
                      "xtick.labelsize": 10, "ytick.labelsize": 10, "legend.fontsize": 10})
 d = os.path.join(ROOT, "results", f"{a.dataset}-labeled-{a.num_labeled}-seed-{a.seed}")
@@ -27,7 +31,7 @@ for m in a.methods:
     ax.set_ylim(a.ymin, a.ymax)
     ax.set_xlabel("Time (min)"); ax.set_ylabel("Accuracy (%)")
     name = m
-    ax.set_title(name, fontweight="bold")
+    ax.set_title(DISPLAY.get(m, m), fontweight="bold")
     ax.grid(alpha=0.3, lw=0.5)
     ax.legend(loc="lower right", fontsize=8, frameon=True, framealpha=0.85)
     fig.tight_layout(pad=0.4)
