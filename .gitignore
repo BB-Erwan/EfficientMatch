@@ -190,3 +190,6 @@ logs/
 
 # Runs from the notebooks (RUN_TAG = "notebook"): personal, never part of the paper
 results/**/*_notebook_metrics.json
+
+# Paper build output
+paper/build/
