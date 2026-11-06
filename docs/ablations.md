@@ -117,6 +117,41 @@ At matched mu, FixMatch remains far more expensive than EfficientMatch, compensa
 unlabeled batch with substantially more iterations rather than converging faster overall — it stays
 2.4x to 3.8x more FLOP-costly (FixMatch at mu = 3 costs 411.33 GFLOPs per iteration, see docs/flops.md). RegMixMatch, in contrast, becomes unstable at this reduced mu: it
 fails to reach 80% on two of the three seeds, and on the third only converges after an initial
-attempt crashed almost immediately. This confirms that EfficientMatch's Mixup channel supplies a
-structurally richer per-iteration signal, rather than merely trading unlabeled-batch size against
-speed.
+attempt crashed almost immediately. This is consistent with EfficientMatch's Mixup channel
+supplying more signal per iteration, rather than merely trading unlabeled-batch size against speed;
+it does not isolate the partner mask, since FixMatch lacks the whole Mixup branch.
+
+### The converse: EfficientMatch at the baselines' mu (rebuttal, no new run)
+
+EfficientMatch was already run at mu = 7 and mu = 1 in the mu sweep (A.1). Put next to the
+baselines of the main experiment (`docs/main_experiment.md`), which run at mu = 7 (FixMatch,
+FlexMatch, RegMixMatch) and mu = 1 (MixMatch), these runs give a matched-mu comparison in the other
+direction. Only CIFAR-10 is covered: it is the only dataset where EfficientMatch was run at several
+values of mu.
+
+**mu = 7** (steps ×1000 / corrected time, min / PFLOPs; seeds 2312, 0308, 2701)
+
+| Config | Method | steps | | | time | | | PFLOPs | | |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| CIFAR-10/250 | FixMatch | 127.0 | 64.0 | 61.5 | 113.7 | 58.2 | 56.3 | 108.0 | 54.4 | 52.3 |
+| | FlexMatch | 65.5 | 52.5 | 42.0 | 63.3 | 51.3 | 40.7 | 55.7 | 44.6 | 35.7 |
+| | RegMixMatch | 35.0 | 25.5 | 21.0 | 60.6 | 43.8 | 36.1 | 66.2 | 48.2 | 39.7 |
+| | **EfficientMatch** | **25.5** | **18.5** | **15.5** | **35.8** | **26.9** | **22.6** | **38.5** | **27.9** | **23.4** |
+| CIFAR-10/4000 | FixMatch | 99.0 | 91.5 | 100.5 | 85.2 | 79.1 | 86.9 | 84.2 | 77.8 | 85.4 |
+| | FlexMatch | 60.5 | 90.0 | 83.5 | 58.1 | 86.4 | 76.8 | 51.4 | 76.5 | 71.0 |
+| | RegMixMatch | **25.0** | 27.0 | 27.0 | 42.9 | 46.2 | 47.2 | 47.3 | 51.1 | 51.1 |
+| | **EfficientMatch** | 26.0 | **25.5** | **26.0** | **36.4** | **35.7** | **36.5** | **39.2** | **38.5** | **39.2** |
+
+**mu = 1**, CIFAR-10/4000
+
+| Method | steps | | | time | | | PFLOPs | | |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| MixMatch | 198.5 | 213.5 | 165.5 | 55.5 | 59.6 | 46.3 | 59.9 | 64.4 | 49.9 |
+| **EfficientMatch** | **99.5** | **101.5** | **100.5** | **39.6** | **42.3** | **39.6** | **35.5** | **36.2** | **35.8** |
+
+At mu = 7, EfficientMatch is faster and cheaper in FLOPs than FixMatch, FlexMatch and RegMixMatch on
+every seed of both configurations (time ratios 1.2x to 3.2x, FLOP ratios 1.2x to 2.8x); in
+iterations it needs fewer than every baseline except RegMixMatch on CIFAR-10/4000 seed 2312 (25.0k
+against 26.0k). At mu = 1 on CIFAR-10/4000 it beats MixMatch on every seed and every metric. At
+250 labels and mu = 1, both fail on most seeds (EfficientMatch 2 of 3, MixMatch 3 of 3), so there
+is nothing to compare.
