@@ -25,6 +25,12 @@ Usage:
     python run_analysis.py at-acc --dataset cifar100 --num_labeled 10000 --seed 2312 --like efficientmatch_ema_wf4
     python run_analysis.py at-acc --dataset cifar10 --num_labeled 250 --seed 2312 --target 0.75
 
+    # Threshold-free comparison (rebuttal E3, option A): mean accuracy over [0, H] of corrected time
+    # (or of PFLOPs), the curve being held at its last value once a run stops at its target and cut
+    # at the 2-hour protocol budget. Per seed, then averaged over seeds, with the rank per horizon.
+    python run_analysis.py auc --dataset cifar10 --num_labeled 250 --seeds 2312 308 2701 --horizons 30 60 120
+    python run_analysis.py auc --dataset cifar10 --num_labeled 250 --seeds 2312 308 2701 --axis flops --horizons 25 50 100
+
     # Just the current status of one method's run (step/acc/time, raw and corrected).
     python run_analysis.py status --dataset cifar10 --num_labeled 250 --seed 2312 --method efficientmatch
 """
@@ -263,6 +269,84 @@ def cmd_at_acc(args):
             print(f"  {name:<28} (WRN-28-{wf}) step={step:<8} t={tm:>7.2f}min  corrected={corr_str:>9}  acc={acc*100:.2f}%")
 
 
+MAIN_METHODS = ["efficientmatch_ema", "fixmatch_ema", "flexmatch_ema", "mixmatch_ema", "regmixmatch_ema"]
+
+
+def held_curve(data, wf, name, dataset, axis, cap_minutes):
+    """(x, acc) points of one run along corrected minutes or PFLOPs, keeping only evaluations made
+    within cap_minutes of raw time (the protocol's budget). Returns None if a cost is unknown."""
+    eval_s = EVAL_SECONDS.get(wf)
+    gflops_it = gflops_for(name, wf, dataset)
+    xs, accs = [], []
+    for i, (step, acc, t) in enumerate(zip(data["step"], data["test_acc"], data["time_elapsed"])):
+        if cap_minutes is not None and t / 60 > cap_minutes:
+            break
+        if axis == "time":
+            if eval_s is None:
+                return None
+            xs.append(max(corrected_minutes(t, i + 1, eval_s), 0.0))
+        else:
+            if gflops_it is None:
+                return None
+            xs.append(step * gflops_it / 1e6)  # PFLOPs
+        accs.append(acc)
+    return xs, accs
+
+
+def mean_acc_over(xs, accs, horizon):
+    """Mean accuracy over [0, horizon] of a step function: each evaluation's accuracy holds until
+    the next evaluation, the first one also covers [0, x_0], and the last one holds up to the
+    horizon (option (a): a run stopped at its target keeps its final accuracy)."""
+    area, prev_x, prev_acc = 0.0, 0.0, accs[0]
+    for x, acc in zip(xs, accs):
+        if x >= horizon:
+            break
+        area += prev_acc * (x - prev_x)
+        prev_x, prev_acc = x, acc
+    area += prev_acc * (horizon - prev_x)
+    return area / horizon
+
+
+def cmd_auc(args):
+    seeds = args.seeds or [args.seed]
+    if not (args.dataset and args.num_labeled and seeds and seeds[0] is not None):
+        raise SystemExit("auc needs --dataset, --num_labeled and --seeds (or --seed)")
+    methods = args.methods or ([m + "_wf4" for m in MAIN_METHODS] if args.dataset == "cifar100" else MAIN_METHODS)
+    unit = "min (corrected)" if args.axis == "time" else "PFLOPs"
+    print(f"\nMean test accuracy (%) over [0, H] {unit}, {args.dataset}/{args.num_labeled}, "
+          f"curves held after the last evaluation, cut at {args.cap_minutes} min of raw time\n")
+
+    table = {m: {h: [] for h in args.horizons} for m in methods}
+    for seed in seeds:
+        args.seed, args.dir = seed, None
+        result_dir = resolve_dir(args)
+        runs = load_runs(result_dir, default_widen_factor(args, result_dir))
+        print(f"seed {seed}")
+        for m in methods:
+            if m not in runs:
+                print(f"  {m:<24} missing")
+                continue
+            data, wf = runs[m]
+            curve = held_curve(data, wf, m, args.dataset, args.axis, args.cap_minutes)
+            if curve is None or not curve[0]:
+                print(f"  {m:<24} no cost constant or no point within the cap")
+                continue
+            vals = [mean_acc_over(*curve, h) * 100 for h in args.horizons]
+            for h, v in zip(args.horizons, vals):
+                table[m][h].append(v)
+            print(f"  {m:<24}" + "".join(f"  H={h:g}: {v:6.2f}" for h, v in zip(args.horizons, vals)))
+
+    print(f"\nMean over {len(seeds)} seed(s), rank in parentheses (1 = highest)")
+    means = {h: {m: sum(v[h]) / len(v[h]) for m, v in table.items() if len(v[h]) == len(seeds)}
+             for h in args.horizons}
+    ranks = {h: {m: r + 1 for r, (m, _) in enumerate(sorted(means[h].items(), key=lambda kv: -kv[1]))}
+             for h in args.horizons}
+    for m in methods:
+        cells = "".join(f"  H={h:g}: {means[h][m]:6.2f} ({ranks[h][m]})" if m in means[h] else f"  H={h:g}:    n/a    "
+                        for h in args.horizons)
+        print(f"  {m:<24}{cells}")
+
+
 def main():
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--dataset", type=str)
@@ -289,6 +373,18 @@ def main():
     group.add_argument("--target", type=float, help="Target accuracy as a 0-1 fraction")
     group.add_argument("--like", type=str, help="Use this method's current best accuracy as the target")
     p_at_acc.set_defaults(func=cmd_at_acc)
+
+    p_auc = sub.add_parser("auc", help="Threshold-free comparison: mean accuracy over a time or FLOPs horizon",
+                           parents=[common])
+    p_auc.add_argument("--seeds", type=int, nargs="+", default=None, help="Seeds to aggregate (overrides --seed)")
+    p_auc.add_argument("--methods", type=str, nargs="+", default=None,
+                       help="Result names to compare (default: the five methods of the main experiment)")
+    p_auc.add_argument("--axis", choices=["time", "flops"], default="time")
+    p_auc.add_argument("--horizons", type=float, nargs="+", default=[30, 60, 120],
+                       help="Horizons H, in corrected minutes (--axis time) or PFLOPs (--axis flops)")
+    p_auc.add_argument("--cap_minutes", type=float, default=120,
+                       help="Drop evaluations made after this raw time, as the protocol's 2-hour budget does")
+    p_auc.set_defaults(func=cmd_auc)
 
     args = parser.parse_args()
     args.func(args)

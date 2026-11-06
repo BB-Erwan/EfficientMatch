@@ -83,8 +83,9 @@ On SVHN/250, EfficientMatch remains fastest in time at a 5-point reduction (2 of
 but MixMatch takes over at 10 points, in both time and FLOPs (2 of 3 seeds each); even at 5
 points, FLOPs shows no clear majority, with three seeds yielding three different winners.
 On CIFAR-10/250, EfficientMatch stays fastest in time even at 10 points (2 of 3 seeds); only
-the FLOPs ranking flips to MixMatch, and only at the largest reduction. CIFAR-10/4000, where
-MixMatch is already competitive at the original threshold, shows little further change.
+the FLOPs ranking flips to MixMatch, and only at the largest reduction. On CIFAR-10/4000 the
+ranking flips entirely: EfficientMatch is fastest on all three seeds at 90%, but MixMatch becomes
+the fastest and the cheapest on all three seeds at both 85% and 80%.
 CIFAR-100/2500 is the clearest case: MixMatch fails outright at the original threshold, yet
 becomes the unanimous winner in both time and FLOPs at a 10-point reduction, moving from
 total failure to total dominance as the target threshold alone changes.
@@ -93,3 +94,72 @@ This is consistent with the paper's diagnosis: the pseudo-label admission bottle
 EfficientMatch targets matters most when the label budget is small *and* the target is high;
 relaxing either condition erodes the advantage. EfficientMatch's advantage should thus be
 read as confined to that regime, not as superiority at every quality level or label budget.
+
+## Threshold-free comparison: mean accuracy over a budget (rebuttal E3, option A)
+
+To remove the dependence on a single target, each method is also scored by its mean test accuracy
+over a budget [0, H], i.e. the area under its accuracy curve divided by H, along corrected
+wall-clock time and along FLOPs. Computed on the existing runs of the main experiment, with no new
+training:
+
+```bash
+python scripts/run_analysis.py auc --dataset cifar10 --num_labeled 250 --seeds 2312 308 2701 --horizons 15 30 60 120
+python scripts/run_analysis.py auc --dataset cifar10 --num_labeled 250 --seeds 2312 308 2701 --axis flops --horizons 10 25 50 100
+```
+
+**How the curves are built.** Accuracy is a step function between evaluations. Evaluations made
+after 120 min of raw time are dropped, as the protocol's 2-hour budget does. A run stopped at its
+target keeps its last accuracy up to H. This holding is a bias: it ignores the gains a method that
+stops early would still have made, so it disadvantages the methods that reach the target first.
+
+### Along corrected time (mean of 3 seeds, % ; rank in parentheses)
+
+| Configuration | H (min) | EfficientMatch | FixMatch | FlexMatch | MixMatch | RegMixMatch |
+|---|---:|---:|---:|---:|---:|---:|
+| CIFAR-10/250 | 15 | **60.2 (1)** | 51.9 (4) | 53.0 (3) | 60.0 (2) | 46.5 (5) |
+| | 30 | **69.7 (1)** | 62.6 (4) | 63.6 (3) | 66.6 (2) | 59.6 (5) |
+| | 60 | **75.0 (1)** | 70.2 (4) | 71.2 (2) | 71.1 (3) | 69.3 (5) |
+| | 120 | **77.6 (1)** | 75.0 (3) | 75.6 (2) | 74.1 (5) | 74.7 (4) |
+| CIFAR-10/4000 | 15 | 74.9 (2) | 70.7 (3) | 68.6 (4) | **80.4 (1)** | 67.3 (5) |
+| | 30 | 82.1 (2) | 78.9 (3) | 77.9 (4) | **84.7 (1)** | 77.3 (5) |
+| | 60 | 86.1 (2) | 83.9 (3) | 83.5 (5) | **87.1 (1)** | 83.5 (4) |
+| | 120 | 88.1 (2) | 86.9 (3) | 86.7 (5) | **88.6 (1)** | 86.8 (4) |
+| SVHN/250 | 15 | 77.0 (2) | 75.8 (3) | 15.3 (5) | **78.3 (1)** | 66.8 (4) |
+| | 30 | 83.7 (2) | 82.9 (3) | 39.5 (5) | **84.4 (1)** | 78.6 (4) |
+| | 60 | 87.0 (2) | 86.5 (3) | 61.0 (5) | **87.5 (1)** | 84.5 (4) |
+| | 120 | 88.6 (2) | 88.3 (3) | 72.3 (5) | **89.1 (1)** | 87.5 (4) |
+| CIFAR-100/2500 | 15 | 20.7 (2) | 17.2 (4) | 7.3 (5) | **31.1 (1)** | 18.7 (3) |
+| | 30 | 29.9 (2) | 24.7 (4) | 19.5 (5) | **36.9 (1)** | 28.2 (3) |
+| | 60 | 38.5 (2) | 31.5 (5) | 32.4 (4) | **40.6 (1)** | 37.2 (3) |
+| | 120 | **44.4 (1)** | 37.6 (5) | 41.2 (4) | 42.9 (3) | 43.8 (2) |
+
+### Along FLOPs (mean of 3 seeds, % ; rank in parentheses)
+
+| Configuration | H (PFLOPs) | EfficientMatch | FixMatch | FlexMatch | MixMatch | RegMixMatch |
+|---|---:|---:|---:|---:|---:|---:|
+| CIFAR-10/250 | 10 | 54.6 (2) | 47.8 (4) | 50.4 (3) | **62.9 (1)** | 35.7 (5) |
+| | 25 | 68.3 (2) | 62.0 (4) | 64.1 (3) | **70.0 (1)** | 55.4 (5) |
+| | 50 | **74.2 (1)** | 69.6 (4) | 71.3 (3) | 73.2 (2) | 66.2 (5) |
+| | 100 | **77.2 (1)** | 74.6 (4) | 75.7 (2) | 75.0 (3) | 73.1 (5) |
+| CIFAR-10/4000 | 10 | 70.9 (2) | 67.1 (3) | 66.1 (4) | **79.7 (1)** | 57.4 (5) |
+| | 25 | 81.4 (2) | 78.7 (3) | 78.5 (4) | **84.9 (1)** | 74.5 (5) |
+| | 50 | 85.7 (2) | 83.6 (4) | 83.7 (3) | **87.1 (1)** | 81.7 (5) |
+| | 100 | 87.9 (2) | 86.6 (4) | 86.8 (3) | **88.5 (1)** | 85.9 (5) |
+| SVHN/250 | 2 | 23.2 (2) | 20.5 (3) | 8.9 (5) | **54.0 (1)** | 10.7 (4) |
+| | 5 | 58.4 (2) | 57.1 (3) | 9.2 (5) | **71.0 (1)** | 27.8 (4) |
+| | 10 | 74.3 (2) | 73.5 (3) | 11.2 (5) | **77.9 (1)** | 55.5 (4) |
+| | 20 | 82.3 (2) | 81.8 (3) | 31.6 (5) | **83.7 (1)** | 72.9 (4) |
+| CIFAR-100/2500 | 25 | 22.3 (2) | 18.8 (3) | 8.8 (5) | **32.8 (1)** | 15.0 (4) |
+| | 50 | 31.0 (2) | 25.9 (3) | 21.6 (5) | **37.9 (1)** | 25.3 (4) |
+| | 100 | 39.3 (2) | 32.3 (5) | 33.8 (4) | **41.1 (1)** | 34.2 (3) |
+| | 200 | **44.7 (1)** | 38.1 (5) | 42.1 (3) | 43.1 (2) | 42.0 (4) |
+
+### What it shows
+
+Without a target, the ranking depends on the configuration. EfficientMatch is first on CIFAR-10/250
+along time at every horizon, and along FLOPs from 50 PFLOPs on. In the three other configurations,
+MixMatch is first at almost every horizon: it rises fastest early in training, then plateaus.
+EfficientMatch is never ranked below second, in any configuration, at any horizon, on either axis.
+No other method has that property: MixMatch drops to fifth on CIFAR-10/250 at 120 min, and FixMatch,
+FlexMatch and RegMixMatch are never first. The target-based advantage of the main tables is
+therefore a statement about reaching high accuracy targets, not about accuracy at every budget.
