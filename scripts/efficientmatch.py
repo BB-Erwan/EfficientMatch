@@ -21,6 +21,12 @@ Two thresholding variants of the paper are reachable from here: --adaptive_thres
 FlexMatch's per-class curriculum, and --freematch_threshold for FreeMatch's self-adaptive rule
 (Table 4). Both replace the fixed tau; neither is the default.
 
+--mix_mask selects which confidence mask gates L_mix (rebuttal ablation E1): 'partner' (default,
+the method), 'none' (unfiltered Mixup), 'anchor', 'both' (anchor AND partner), or 'premix'
+(unreliable unlabeled samples are removed from the pool before mixing; partners are drawn among
+reliable samples only). Model calls and batch sizes are identical across variants, so the FLOPs
+per iteration are the same.
+
     python efficientmatch.py --dataset cifar10 --num_labeled 250 --seed 2312 --target_acc 0.80
 """
 import argparse
@@ -62,6 +68,11 @@ parser.add_argument("--mixing_target", type=str, default="semi_soft", choices=["
                          "mixture back to a single class, treating the mixed sample as a plain augmentation; "
                          "'soft' mixes with the partner's full softmax distribution, a noisier target. "
                          "Results are written as efficientmatch_hard_* and efficientmatch_soft_*.")
+parser.add_argument("--mix_mask", type=str, default="partner",
+                    choices=["partner", "none", "anchor", "both", "premix"],
+                    help="Which confidence mask gates the Mixup loss (rebuttal ablation E1). 'partner' "
+                         "(default) is the method of the paper. Non-default values are written as "
+                         "efficientmatch_*_mixmask_<value>.")
 parser.add_argument("--T", type=float, default=0.5, help="Sharpening temperature (unused at the defaults).")
 parser.add_argument("--adaptive_threshold", type=str2bool, default=False,
                     help="Replace the fixed tau with FlexMatch's per-class curriculum thresholding.")
@@ -80,6 +91,43 @@ parser.add_argument("--freematch_svhn_clamp", type=str2bool, default=True,
                          "never converges on SVHN (Appendix A.5); results are then written as "
                          "efficientmatch_freematch_noclamp_*.")
 args = parser.parse_args()
+
+
+def mixing_partners_and_weights(mix_mask, anchor_masks):
+    """Partner index for every sample of the X + U_w pool, and the per-sample weight of L_mix.
+
+    anchor_masks holds 1 for labeled samples and the confidence mask for unlabeled ones. All variants
+    keep the pool size fixed and the loss normalised over the whole pool (.mean()), so they differ
+    only in which mixed samples count:
+      partner  partners from a uniform shuffle; weight = partner's mask (the method of the paper)
+      none     partners from a uniform shuffle; weight = 1 (unfiltered Mixup)
+      anchor   partners from a uniform shuffle; weight = anchor's own mask
+      both     partners from a uniform shuffle; weight = anchor's mask * partner's mask
+      premix   unreliable samples are removed before mixing: partners are a shuffle of the reliable
+               samples only, and unreliable anchors get weight 0. Implemented with static shapes.
+    """
+    n = anchor_masks.size(0)
+    device = anchor_masks.device
+    if mix_mask == "premix":
+        reliable = anchor_masks > 0
+        # Random keys, reliable samples first: the first r entries of `order` are a uniform
+        # shuffle of the reliable indices. The k-th reliable anchor is paired with the k-th of them.
+        keys = torch.rand(n, device=device) + (~reliable).float() * 2.0
+        order = torch.argsort(keys)
+        rank = (torch.cumsum(reliable.long(), dim=0) - 1).clamp(min=0)
+        partner = torch.where(reliable, order[rank], torch.arange(n, device=device))
+        return partner, anchor_masks
+    partner = torch.randperm(n, device=device)
+    partner_masks = anchor_masks[partner]
+    if mix_mask == "partner":
+        return partner, partner_masks
+    if mix_mask == "none":
+        return partner, torch.ones_like(anchor_masks)
+    if mix_mask == "anchor":
+        return partner, anchor_masks
+    if mix_mask == "both":
+        return partner, anchor_masks * partner_masks
+    raise ValueError(f"Unknown mix_mask: {mix_mask}")
 
 
 def run_efficientmatch():
@@ -113,6 +161,7 @@ def run_efficientmatch():
                    + ("_ema" if args.use_ema else "")
                    + (f"_mu{args.mu}" if args.mu != 3 else "")
                    + (f"_mixw{args.mixup_weight}" if args.mixup_weight != 1.0 else "")
+                   + (f"_mixmask_{args.mix_mask}" if args.mix_mask != "partner" else "")
                    + (f"_wf{args.widen_factor}" if args.widen_factor != 2 else "")
                    + (f"_{args.tag}" if args.tag else ""))
     path = results_path(args, method_name)
@@ -217,10 +266,10 @@ def run_efficientmatch():
             one_hot_u = F.one_hot(pseudo, num_classes=num_classes).float()
             all_inputs = torch.cat([x_l, x_u_w], dim=0)
             all_targets = torch.cat([one_hot_l, one_hot_u], dim=0)
-            all_masks = torch.cat([torch.ones(n_l, device=device), mask], dim=0)
+            anchor_masks = torch.cat([torch.ones(n_l, device=device), mask], dim=0)
 
-            partner = torch.randperm(all_inputs.size(0), device=all_inputs.device)
-            all_inputs, all_targets, all_masks = all_inputs[partner], all_targets[partner], all_masks[partner]
+            partner, mix_weights = mixing_partners_and_weights(args.mix_mask, anchor_masks)
+            all_inputs, all_targets = all_inputs[partner], all_targets[partner]
 
             # lambda >= 0.5 keeps the anchor dominant in the mix.
             lam_x = beta_dist.sample((n_l,))
@@ -243,10 +292,10 @@ def run_efficientmatch():
             if args.mixing_target == "hard":
                 mixup_targets = mixup_targets.argmax(dim=1)
 
-            # all_masks is the *partner's* mask after the shuffle: a mixed sample counts only if the
-            # sample it was mixed with was confident enough.
+            # With the default --mix_mask partner, mix_weights is the *partner's* mask after the
+            # shuffle: a mixed sample counts only if the sample it was mixed with was confident enough.
             loss_mixup = args.mixup_weight * (
-                all_masks * F.cross_entropy(mixup_logits, mixup_targets, reduction="none")
+                mix_weights * F.cross_entropy(mixup_logits, mixup_targets, reduction="none")
             ).mean()
 
             loss = loss_supervised + loss_consistency + loss_mixup
