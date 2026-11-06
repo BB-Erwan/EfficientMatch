@@ -37,7 +37,7 @@ import re
 # GFLOPs per training iteration, keyed by widen_factor then by method name. See docs/flops.md.
 GFLOPS_PER_IT = {
     2: {
-        "fixmatch": 850.10, "flexmatch": 850.10, "mixmatch": 301.64,
+        "fixmatch": 850.10, "fixmatch_mu3": 411.33, "flexmatch": 850.10, "mixmatch": 301.64,
         "efficientmatch": 740.35, "efficientmatch_hard": 740.35, "efficientmatch_soft": 740.35,
         "efficientmatch_mu1": 356.46, "efficientmatch_mu5": 1124.25, "efficientmatch_mu7": 1508.14,
         "efficientmatch_flex": 740.35, "efficientmatch_flex_mu2": 548.40, "efficientmatch_hard_flex": 740.35,

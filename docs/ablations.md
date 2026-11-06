@@ -109,13 +109,13 @@ unlabeled batch, FixMatch and RegMixMatch are run at mu = 3 as well, on CIFAR-10
 | method (mu = 3) | steps (×1000) | | | corrected time (min) | | | PFLOPs | | |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | seed | 2312 | 0308 | 2701 | 2312 | 0308 | 2701 | 2312 | 0308 | 2701 |
-| FixMatch | 202.5 | 197.0 | 110.0 | 93.6 | 91.3 | 51.1 | 172.1 | 167.5 | 93.5 |
+| FixMatch | 202.5 | 197.0 | 110.0 | 93.6 | 91.3 | 51.1 | 83.3 | 81.0 | 45.2 |
 | RegMixMatch | † (76.3%) | † (72.2%) | 35.5 | † | † | 28.2 | † | † | 32.1 |
 | **EfficientMatch** | **42.0** | **28.5** | **25.0** | **29.6** | **20.3** | **17.9** | **31.1** | **21.1** | **18.5** |
 
 At matched mu, FixMatch remains far more expensive than EfficientMatch, compensating for the reduced
 unlabeled batch with substantially more iterations rather than converging faster overall — it stays
-5.1x to 7.9x more FLOP-costly. RegMixMatch, in contrast, becomes unstable at this reduced mu: it
+2.4x to 3.8x more FLOP-costly (FixMatch at mu = 3 costs 411.33 GFLOPs per iteration, see docs/flops.md). RegMixMatch, in contrast, becomes unstable at this reduced mu: it
 fails to reach 80% on two of the three seeds, and on the third only converges after an initial
 attempt crashed almost immediately. This confirms that EfficientMatch's Mixup channel supplies a
 structurally richer per-iteration signal, rather than merely trading unlabeled-batch size against

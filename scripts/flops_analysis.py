@@ -35,6 +35,7 @@ BATCH_SIZE_L = 64
 # Unlabeled:labeled ratio per method, as hardcoded in each training script.
 MU = {
     "fixmatch": 7,
+    "fixmatch_mu3": 3,
     "flexmatch": 7,
     "mixmatch": 1,
     "efficientmatch": 3,
@@ -66,9 +67,9 @@ def _dummy_labels(n, device):
     return torch.randint(0, NUM_CLASSES, (n,), device=device)
 
 
-def fixmatch_iter_flops(model, device):
+def fixmatch_iter_flops(model, device, mu=None):
     """1 no-grad forward for the pseudo-labels (mu*B), then 1 fused forward+backward (B + mu*B)."""
-    B, muB = BATCH_SIZE_L, MU["fixmatch"] * BATCH_SIZE_L
+    B, muB = BATCH_SIZE_L, (mu if mu is not None else MU["fixmatch"]) * BATCH_SIZE_L
     x_l, y_l = _dummy_images(B, device), _dummy_labels(B, device)
     x_u_w, x_u_s = _dummy_images(muB, device), _dummy_images(muB, device)
 
@@ -243,6 +244,7 @@ def regmixmatch_iter_flops(model, device, mu=None):
 
 METHODS = {
     "fixmatch": fixmatch_iter_flops,
+    "fixmatch_mu3": partial(fixmatch_iter_flops, mu=MU["fixmatch_mu3"]),
     "flexmatch": flexmatch_iter_flops,
     "mixmatch": mixmatch_iter_flops,
     "efficientmatch": efficientmatch_iter_flops,

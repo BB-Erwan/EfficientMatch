@@ -30,6 +30,8 @@ method, which is where most of the spread comes from.
 | EfficientMatch, mu = 1 | 1 | 64 | 356.46 |
 | EfficientMatch, mu = 5 | 5 | 320 | 1124.25 |
 | EfficientMatch, mu = 7 | 7 | 448 | 1508.14 |
+| FixMatch, mu = 3 | 3 | 192 | 411.33 |
+| RegMixMatch, mu = 3 | 3 | 192 | 904.80 |
 
 **WideResNet-28-4 (CIFAR-100)**
 
