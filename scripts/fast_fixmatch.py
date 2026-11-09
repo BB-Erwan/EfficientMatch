@@ -18,6 +18,12 @@ iteration means varying tensor shapes, and torch.compile in reduce-overhead mode
 graph for each distinct shape: the 62.6% saving in FLOPs turns into a 2.13x *loss* in wall-clock
 time on this pipeline. See docs/fast_fixmatch.md.
 
+--full adds the two other components of Fast FixMatch as defined by its authors (Algorithm 1 of
+Chen et al.): strong augmentation of the labeled batch (RandAugment here, AutoAugment in the paper)
+and FlexMatch's Curriculum Pseudo Labeling with the convex mapping, and scales the unlabeled loss
+weight with the current unlabeled batch (lambda = u_bs / max batch, so lambda = 1 at the full batch,
+as in FixMatch). Use it with --cbs_total_steps 1048576, the horizon of the paper (the whole run).
+
 Because the point of this method is the compute it saves, it also records the FLOPs it actually
 spends, calibrated once on the real model rather than assumed.
 
@@ -53,6 +59,9 @@ parser.add_argument("--alpha", type=float, default=0.7, help="Curvature of the B
 parser.add_argument("--cbs_min_batch", type=int, default=8, help="Floor on the unlabeled batch size.")
 parser.add_argument("--cbs_total_steps", type=int, default=60000,
                     help="Curriculum horizon T, decoupled from --total_steps (see module docstring).")
+parser.add_argument("--full", type=str2bool, default=False,
+                    help="Full Fast FixMatch: CBS + strong labeled augmentation + FlexMatch CPL + "
+                         "lambda scaled with the unlabeled batch. Results get a '_full' suffix.")
 parser.add_argument("--compile", type=str2bool, default=True,
                     help="torch.compile the model. False runs in eager mode, where varying batch shapes "
                          "cost no recompilation; results then get an '_eager' suffix.")
@@ -108,6 +117,8 @@ def run_fast_fixmatch():
 
     method_name = ("fast_fixmatch"
                    + ("_ema" if args.use_ema else "")
+                   + ("_full" if args.full else "")
+                   + (f"_cbs{args.cbs_total_steps}" if args.full and args.cbs_total_steps != 60000 else "")
                    + ("" if args.compile else "_eager")
                    + (f"_wf{args.widen_factor}" if args.widen_factor != 2 else "")
                    + (f"_{args.tag}" if args.tag else ""))
@@ -119,6 +130,10 @@ def run_fast_fixmatch():
     confidences = torch.zeros(len(unlabeled_ds), dtype=torch.float32)
     pseudo_state = (pseudo_labels, confidences, pseudo_labels.clone(), confidences.clone(),
                     torch.tensor([label for _, label, _ in unlabeled_ds]))
+
+    # FlexMatch CPL state, used only with --full.
+    selected_label = torch.full((len(unlabeled_ds),), -1, dtype=torch.long, device=device)
+    classwise_acc = torch.zeros(num_classes, dtype=torch.float32, device=device)
 
     losses, mask_ratios, cumulative_gflops = [], [], 0.0
     start_time = time.time()
@@ -145,21 +160,34 @@ def run_fast_fixmatch():
         x_u, idx = x_u[:u_bs], idx[:u_bs]
         cumulative_gflops += step_gflops(u_bs)
 
+        labeled_transform = strong_transform if args.full else weak_transform
         if args.optimized:
-            x_l = weak_transform(x_l).to(device, non_blocking=True, memory_format=torch.channels_last)
+            x_l = labeled_transform(x_l).to(device, non_blocking=True, memory_format=torch.channels_last)
             y_l = y_l.to(device, non_blocking=True)
             x_u_w = weak_transform(x_u).to(device, non_blocking=True, memory_format=torch.channels_last)
             x_u_s = strong_transform(x_u).to(device, non_blocking=True, memory_format=torch.channels_last)
         else:
-            x_l, y_l = weak_transform(x_l).to(device), y_l.to(device)
+            x_l, y_l = labeled_transform(x_l).to(device), y_l.to(device)
             x_u_w, x_u_s = weak_transform(x_u).to(device), strong_transform(x_u).to(device)
+        idx_device = idx.to(device)
 
         with torch.no_grad():
             with autocast(device_type="cuda", dtype=torch.bfloat16) if args.optimized else nullcontext():
                 logits_u_w = model(x_u_w)
             probs_u_w = F.softmax(logits_u_w.float(), dim=1)
             max_prob, pseudo = torch.max(probs_u_w, dim=1)
-            mask = max_prob.ge(args.tau).float()
+            if args.full:
+                # FlexMatch Curriculum Pseudo Labeling, convex mapping, with threshold warm-up.
+                acc_per_sample = classwise_acc[pseudo]
+                mask = max_prob.ge(args.tau * (acc_per_sample / (2.0 - acc_per_sample))).float()
+                select = max_prob.ge(args.tau)
+                if select.any():
+                    selected_label[idx_device[select]] = pseudo[select]
+                counts = torch.bincount(selected_label + 1, minlength=num_classes + 1)
+                if counts.max().item() < selected_label.shape[0]:
+                    classwise_acc = counts[1:].float() / max(counts.max().item(), 1)
+            else:
+                mask = max_prob.ge(args.tau).float()
             mask_ratios.append(mask.mean().item())
 
         optimizer.zero_grad(set_to_none=True)
@@ -169,6 +197,8 @@ def run_fast_fixmatch():
             all_logits = model(torch.cat([x_l, x_u_s], dim=0))
             loss_supervised = F.cross_entropy(all_logits[:n_l], y_l)
             loss_consistency = (mask * F.cross_entropy(all_logits[n_l:], pseudo, reduction="none")).mean()
+            if args.full:
+                loss_consistency = loss_consistency * (u_bs / max_u_batch)
             loss = loss_supervised + loss_consistency
             losses.append(loss.item())
 

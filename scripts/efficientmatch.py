@@ -27,6 +27,12 @@ the method), 'none' (unfiltered Mixup), 'anchor', 'both' (anchor AND partner), o
 reliable samples only). Model calls and batch sizes are identical across variants, so the FLOPs
 per iteration are the same.
 
+--mix_input extra_strong is a control for the Mixup channel: the third forward pass gets a fresh
+strong augmentation of each pool sample, with no mixing, trained against the sample's own target
+(true label or hard pseudo-label) and weighted by --mix_mask (use 'none' to match unfiltered Mixup).
+It asks whether the Mixup channel helps as mixing or merely as one more augmented view; the model
+calls and FLOPs are unchanged.
+
     python efficientmatch.py --dataset cifar10 --num_labeled 250 --seed 2312 --target_acc 0.80
 """
 import argparse
@@ -73,6 +79,10 @@ parser.add_argument("--mix_mask", type=str, default="partner",
                     help="Which confidence mask gates the Mixup loss. 'partner' "
                          "(default) is the method of the paper. Non-default values are written as "
                          "efficientmatch_*_mixmask_<value>.")
+parser.add_argument("--mix_input", type=str, default="mixup", choices=["mixup", "extra_strong"],
+                    help="'mixup' (default) mixes each pool sample with its partner. 'extra_strong' "
+                         "replaces the mix by a fresh strong augmentation of the sample itself, with its "
+                         "own target (control). Non-default results are written as *_extrastrong.")
 parser.add_argument("--T", type=float, default=0.5, help="Sharpening temperature (unused at the defaults).")
 parser.add_argument("--adaptive_threshold", type=str2bool, default=False,
                     help="Replace the fixed tau with FlexMatch's per-class curriculum thresholding.")
@@ -151,6 +161,8 @@ def run_efficientmatch():
     model, base_model, eval_model, ema, optimizer, scheduler = build_model_and_optimizer(
         args, num_classes, device)
 
+    if args.mix_input == "extra_strong" and args.mix_mask not in ("none", "anchor"):
+        raise ValueError("--mix_input extra_strong has no partner: use --mix_mask none or anchor.")
     if args.adaptive_threshold and args.freematch_threshold:
         raise ValueError("--adaptive_threshold (FlexMatch) and --freematch_threshold are mutually exclusive.")
     variant = {"hard": "efficientmatch_hard", "soft": "efficientmatch_soft"}.get(args.mixing_target,
@@ -162,6 +174,7 @@ def run_efficientmatch():
                    + (f"_mu{args.mu}" if args.mu != 3 else "")
                    + (f"_mixw{args.mixup_weight}" if args.mixup_weight != 1.0 else "")
                    + (f"_mixmask_{args.mix_mask}" if args.mix_mask != "partner" else "")
+                   + ("_extrastrong" if args.mix_input == "extra_strong" else "")
                    + (f"_wf{args.widen_factor}" if args.widen_factor != 2 else "")
                    + (f"_{args.tag}" if args.tag else ""))
     path = results_path(args, method_name)
@@ -199,6 +212,7 @@ def run_efficientmatch():
             unlabeled_iter = iter(unlabeled_loader)
             x_u, y_u, idx = next(unlabeled_iter)
 
+        x_l_raw = x_l  # kept for the --mix_input extra_strong control
         # Both views are built here, from the same raw batch, then moved to the GPU.
         if args.optimized:
             x_l = weak_transform(x_l).to(device, non_blocking=True, memory_format=torch.channels_last)
@@ -284,6 +298,19 @@ def run_efficientmatch():
             anchor_u = probs_u_w if args.mixing_target == "soft" else one_hot_u
             mixup_targets_x = torch.lerp(all_targets[:n_l], one_hot_l, lam_x.view(-1, 1))
             mixup_targets_u = torch.lerp(all_targets[n_l:], anchor_u, lam_u.view(-1, 1))
+
+            if args.mix_input == "extra_strong":
+                # Control: same pass size and weights, but each sample is a fresh strong view of
+                # itself, with its own target, instead of a mix with its partner.
+                if args.optimized:
+                    extra_l = strong_transform(x_l_raw).to(device, non_blocking=True,
+                                                           memory_format=torch.channels_last)
+                    extra_u = strong_transform(x_u).to(device, non_blocking=True,
+                                                       memory_format=torch.channels_last)
+                else:
+                    extra_l, extra_u = strong_transform(x_l_raw).to(device), strong_transform(x_u).to(device)
+                mixup_x, mixup_u = extra_l, extra_u
+                mixup_targets_x, mixup_targets_u = one_hot_l, anchor_u
 
             mixup_logits = model(torch.cat([mixup_x, mixup_u], dim=0))
             mixup_targets = torch.cat([mixup_targets_x, mixup_targets_u], dim=0)
