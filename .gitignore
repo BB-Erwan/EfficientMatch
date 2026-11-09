@@ -194,6 +194,6 @@ results/**/*_notebook_metrics.json
 # Paper build output
 paper/build/
 
-# Rebuttal drafting and paper sources stay local
+# Paper drafting stays local
 paper/
 rebuttal/

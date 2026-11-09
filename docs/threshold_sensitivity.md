@@ -95,7 +95,7 @@ EfficientMatch targets matters most when the label budget is small *and* the tar
 relaxing either condition erodes the advantage. EfficientMatch's advantage should thus be
 read as confined to that regime, not as superiority at every quality level or label budget.
 
-## Threshold-free comparison: mean accuracy over a budget (rebuttal E3, option A)
+## Threshold-free comparison: mean accuracy over a budget
 
 To remove the dependence on a single target, each method is also scored by its mean test accuracy
 over a budget [0, H], i.e. the area under its accuracy curve divided by H, along corrected

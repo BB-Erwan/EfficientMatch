@@ -21,7 +21,7 @@ Two thresholding variants of the paper are reachable from here: --adaptive_thres
 FlexMatch's per-class curriculum, and --freematch_threshold for FreeMatch's self-adaptive rule
 (Table 4). Both replace the fixed tau; neither is the default.
 
---mix_mask selects which confidence mask gates L_mix (rebuttal ablation E1): 'partner' (default,
+--mix_mask selects which confidence mask gates L_mix: 'partner' (default,
 the method), 'none' (unfiltered Mixup), 'anchor', 'both' (anchor AND partner), or 'premix'
 (unreliable unlabeled samples are removed from the pool before mixing; partners are drawn among
 reliable samples only). Model calls and batch sizes are identical across variants, so the FLOPs
@@ -70,7 +70,7 @@ parser.add_argument("--mixing_target", type=str, default="semi_soft", choices=["
                          "Results are written as efficientmatch_hard_* and efficientmatch_soft_*.")
 parser.add_argument("--mix_mask", type=str, default="partner",
                     choices=["partner", "none", "anchor", "both", "premix"],
-                    help="Which confidence mask gates the Mixup loss (rebuttal ablation E1). 'partner' "
+                    help="Which confidence mask gates the Mixup loss. 'partner' "
                          "(default) is the method of the paper. Non-default values are written as "
                          "efficientmatch_*_mixmask_<value>.")
 parser.add_argument("--T", type=float, default=0.5, help="Sharpening temperature (unused at the defaults).")

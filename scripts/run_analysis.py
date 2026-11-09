@@ -25,7 +25,7 @@ Usage:
     python run_analysis.py at-acc --dataset cifar100 --num_labeled 10000 --seed 2312 --like efficientmatch_ema_wf4
     python run_analysis.py at-acc --dataset cifar10 --num_labeled 250 --seed 2312 --target 0.75
 
-    # Threshold-free comparison (rebuttal E3, option A): mean accuracy over [0, H] of corrected time
+    # Threshold-free comparison: mean accuracy over [0, H] of corrected time
     # (or of PFLOPs), the curve being held at its last value once a run stops at its target and cut
     # at the 2-hour protocol budget. Per seed, then averaged over seeds, with the rank per horizon.
     python run_analysis.py auc --dataset cifar10 --num_labeled 250 --seeds 2312 308 2701 --horizons 30 60 120

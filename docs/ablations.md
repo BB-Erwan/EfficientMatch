@@ -121,7 +121,7 @@ attempt crashed almost immediately. This is consistent with EfficientMatch's Mix
 supplying more signal per iteration, rather than merely trading unlabeled-batch size against speed;
 it does not isolate the partner mask, since FixMatch lacks the whole Mixup branch.
 
-### The converse: EfficientMatch at the baselines' mu (rebuttal, no new run)
+### The converse: EfficientMatch at the baselines' mu (no new run)
 
 EfficientMatch was already run at mu = 7 and mu = 1 in the mu sweep (A.1). Put next to the
 baselines of the main experiment (`docs/main_experiment.md`), which run at mu = 7 (FixMatch,
@@ -156,7 +156,7 @@ against 26.0k). At mu = 1 on CIFAR-10/4000 it beats MixMatch on every seed and e
 250 labels and mu = 1, both fail on most seeds (EfficientMatch 2 of 3, MixMatch 3 of 3), so there
 is nothing to compare.
 
-## E1 — Which mask gates the Mixup loss (rebuttal, CIFAR-10/250, target 80%, mu = 3)
+## E1 — Which mask gates the Mixup loss (CIFAR-10/250, target 80%, mu = 3)
 
 Flag `--mix_mask` of `scripts/efficientmatch.py`; only the weight of L_mix changes (same pool,
 normalization and 740.35 GFLOPs per iteration). `partner` is the submitted method
