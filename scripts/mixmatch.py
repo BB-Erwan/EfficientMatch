@@ -42,6 +42,10 @@ logger = logging.getLogger(__name__)
 
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 add_common_args(parser)
+parser.add_argument("--lx_target", type=str, default="own", choices=["own", "mixed"],
+                    help="Target of L_x on the mixed labeled part: 'own' (default, every run of the paper) "
+                         "uses the sample's own label; 'mixed' uses the mixed target, as in MixMatch as "
+                         "published (soft cross-entropy). Non-default results get a '_lxmixed' suffix.")
 parser.add_argument("--T", type=float, default=0.5,
                     help="Sharpening temperature applied to the averaged guess. Lower is sharper.")
 parser.add_argument("--alpha", type=float, default=0.75,
@@ -77,6 +81,7 @@ def run_mixmatch():
 
     method_name = ("mixmatch"
                    + ("_ema" if args.use_ema else "")
+                   + ("_lxmixed" if args.lx_target == "mixed" else "")
                    + (f"_wf{args.widen_factor}" if args.widen_factor != 2 else "")
                    + (f"_{args.tag}" if args.tag else ""))
     path = results_path(args, method_name)
@@ -159,7 +164,11 @@ def run_mixmatch():
             all_logits = model(torch.cat([mixup_x, mixup_u], dim=0))
             logits_l, logits_u = all_logits[:n_l], all_logits[n_l:]
 
-        loss_l = F.cross_entropy(logits_l, y_l)   # against y_l, not mixup_targets_x: see the module docstring
+        if args.lx_target == "mixed":
+            # MixMatch as published: cross-entropy against the mixed (soft) target.
+            loss_l = -(mixup_targets_x.float() * F.log_softmax(logits_l.float(), dim=1)).sum(dim=1).mean()
+        else:
+            loss_l = F.cross_entropy(logits_l, y_l)   # against y_l, not mixup_targets_x: see the module docstring
 
         optimizer.zero_grad(set_to_none=True)
         loss_u = F.mse_loss(F.softmax(logits_u.float(), dim=1), mixup_targets_u.float())
