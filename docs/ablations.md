@@ -155,3 +155,27 @@ iterations it needs fewer than every baseline except RegMixMatch on CIFAR-10/400
 against 26.0k). At mu = 1 on CIFAR-10/4000 it beats MixMatch on every seed and every metric. At
 250 labels and mu = 1, both fail on most seeds (EfficientMatch 2 of 3, MixMatch 3 of 3), so there
 is nothing to compare.
+
+## E1 — Which mask gates the Mixup loss (rebuttal, CIFAR-10/250, target 80%, mu = 3)
+
+Flag `--mix_mask` of `scripts/efficientmatch.py`; only the weight of L_mix changes (same pool,
+normalization and 740.35 GFLOPs per iteration). `partner` is the submitted method
+(`efficientmatch_ema_metrics.json`); the others are `efficientmatch_ema_mixmask_<variant>_metrics.json`.
+All 12 new runs reached 80%. Corrected minutes to 80% (ratio to `partner`), from
+`scripts/run_analysis.py compare`:
+
+| Variant | 2312 | 0308 | 2701 | Mean |
+|---|---|---|---|---|
+| none (unfiltered Mixup) | 24.4 (0.82) | 14.3 (0.70) | 12.2 (0.68) | 17.0 |
+| partner (submitted) | 29.6 | 20.3 | 17.9 | 22.6 |
+| anchor | 41.6 (1.41) | 28.5 (1.40) | 21.6 (1.21) | 30.6 |
+| premix (filter before mixing) | 42.8 (1.45) | 30.0 (1.48) | 27.9 (1.56) | 33.6 |
+| both (anchor x partner) | 45.9 (1.55) | 33.4 (1.65) | 23.7 (1.32) | 34.3 |
+
+Iterations (k): none 34.5 / 20.0 / 17.0; partner 42.0 / 28.5 / 25.0; anchor 59.0 / 40.5 / 30.5;
+premix 60.0 / 42.5 / 39.5; both 65.5 / 47.5 / 33.5 (seeds 2312 / 0308 / 2701). PFLOPs follow
+iterations exactly (0.74035 TFLOPs per iteration).
+
+The ordering none < partner < {anchor, premix, both} holds on every seed. Filtering the mix slows
+convergence here, the stricter the filter the slower; the speed-up comes from the Mixup channel,
+not from the confidence mask. Scope: one configuration, one target.
