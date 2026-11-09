@@ -37,7 +37,7 @@ from torch.utils.flop_counter import FlopCounterMode
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from common.args import add_common_args
+from common.args import add_common_args, str2bool
 from common.data import build_loaders, build_transforms, class_counts, load_datasets, split_labeled_unlabeled
 from common.recording import evaluate_and_log, new_metrics, results_path, track_pseudo_labels
 from common.setup import build_model_and_optimizer, enable_runtime_optimizations, select_device
@@ -53,6 +53,9 @@ parser.add_argument("--alpha", type=float, default=0.7, help="Curvature of the B
 parser.add_argument("--cbs_min_batch", type=int, default=8, help="Floor on the unlabeled batch size.")
 parser.add_argument("--cbs_total_steps", type=int, default=60000,
                     help="Curriculum horizon T, decoupled from --total_steps (see module docstring).")
+parser.add_argument("--compile", type=str2bool, default=True,
+                    help="torch.compile the model. False runs in eager mode, where varying batch shapes "
+                         "cost no recompilation; results then get an '_eager' suffix.")
 args = parser.parse_args()
 
 
@@ -81,7 +84,7 @@ def run_fast_fixmatch():
         labeled_ds, unlabeled_ds, test_ds, norm_transform, batch_size_l, args.mu, args.optimized)
 
     model, base_model, eval_model, ema, optimizer, scheduler = build_model_and_optimizer(
-        args, num_classes, device)
+        args, num_classes, device, compile_model=args.compile)
 
     # Calibrate the per-sample cost once on the real model, so the FLOPs this run reports are
     # measured rather than assumed. Forward-only for the pseudo-label pass, forward+backward for the
@@ -105,6 +108,7 @@ def run_fast_fixmatch():
 
     method_name = ("fast_fixmatch"
                    + ("_ema" if args.use_ema else "")
+                   + ("" if args.compile else "_eager")
                    + (f"_wf{args.widen_factor}" if args.widen_factor != 2 else "")
                    + (f"_{args.tag}" if args.tag else ""))
     path = results_path(args, method_name)
