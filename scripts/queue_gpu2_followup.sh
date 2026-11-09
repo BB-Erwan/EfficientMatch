@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Follow-up to queue_rebuttal_gpu2.sh: the full Fast FixMatch run of seed 2312 crashed on a Windows
+# file lock (fixed in common/recording.py). When the main queue reaches its last step (the 16-hour
+# FixMatch run), stop that run right away, re-run Fast FixMatch seed 2312, then restart FixMatch.
+set -u
+cd "$(dirname "$0")/.."
+source /c/Users/bertranh/anaconda3/etc/profile.d/conda.sh
+conda activate DEEP-GPU
+until [ "$(grep -c ' start ' logs/gpu2_queue.log)" -ge 7 ] || grep -q 'queue done' logs/gpu2_queue.log; do sleep 20; done
+powershell.exe -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { \$_.CommandLine -match 'fixmatch.py --dataset cifar10 --num_labeled 250 --seed 42' -and \$_.CommandLine -notmatch 'fast_fixmatch' } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force }"
+sleep 5
+partial="results/cifar10-labeled-250-seed-42/fixmatch_ema_unlimited_metrics.json"
+[ -f "$partial" ] && mv "$partial" "results/cifar10-labeled-250-seed-42/fixmatch_ema_unlimited_killed_metrics.json"
+echo "$(date '+%F %T') start ffm_full_seed2312 (re-run)"
+timeout 130m python scripts/fast_fixmatch.py --dataset cifar10 --num_labeled 250 --seed 2312 \
+  --target_acc 0.80 --max_minutes 120 --full true --cbs_total_steps 1048576 --compile false \
+  > logs/gpu2/ffm_full_seed2312_rerun.log 2>&1
+rc=$?; echo "$(date '+%F %T') end ffm_full_seed2312 exit=$rc"
+echo "$(date '+%F %T') start fixmatch_full_seed42"
+timeout 20h python scripts/fixmatch.py --dataset cifar10 --num_labeled 250 --seed 42 --tag unlimited \
+  > logs/gpu2/fixmatch_full_seed42.log 2>&1
+rc=$?; echo "$(date '+%F %T') end fixmatch_full_seed42 exit=$rc"
+echo "$(date '+%F %T') follow-up done"

@@ -69,6 +69,24 @@ def track_pseudo_labels(pseudo_labels, confidences, indices, mask, pseudo, max_p
     confidences[indices] = torch.where(admitted, max_prob.cpu(), confidences[indices])
 
 
+def write_metrics(path, metrics, attempts=10):
+    """Write the metrics JSON through a temporary file and an atomic rename, retrying on OSError:
+    on Windows another process (antivirus, indexer) can briefly lock the file, which once crashed a
+    run mid-training (Errno 22 on open). A failed write is logged and skipped rather than fatal; the
+    next evaluation rewrites the whole file anyway."""
+    tmp = path + ".tmp"
+    for attempt in range(attempts):
+        try:
+            with open(tmp, "w") as fh:
+                json.dump(metrics, fh, indent=4)
+            os.replace(tmp, path)
+            return
+        except OSError as err:
+            logger.warning(f"Writing {path} failed ({err}), attempt {attempt + 1}/{attempts}")
+            time.sleep(1.0)
+    logger.error(f"Giving up writing {path} at this evaluation; the next one will retry.")
+
+
 def evaluate_and_log(args, step, metrics, path, eval_model, test_loader, device, start_time,
                      losses, mask_ratios, pseudo_state, extra=None):
     """Evaluate, append one entry to every metric, rewrite the JSON file, log a summary line, and
@@ -105,8 +123,7 @@ def evaluate_and_log(args, step, metrics, path, eval_model, test_loader, device,
     last_pseudo_labels.copy_(pseudo_labels)
     last_confidences.copy_(confidences)
 
-    with open(path, "w") as fh:
-        json.dump(metrics, fh, indent=4)
+    write_metrics(path, metrics)
 
     if args.verbose:
         print()   # the per-iteration line is rewritten in place; close it before logging
