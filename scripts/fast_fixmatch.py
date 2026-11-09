@@ -45,7 +45,7 @@ from torch.utils.flop_counter import FlopCounterMode
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from common.args import add_common_args, str2bool
-from common.data import build_loaders, build_transforms, class_counts, load_datasets, split_labeled_unlabeled
+from common.data import build_loaders, build_transforms, class_counts, image_size, load_datasets, split_labeled_unlabeled
 from common.recording import evaluate_and_log, new_metrics, results_path, track_pseudo_labels
 from common.setup import build_model_and_optimizer, enable_runtime_optimizations, select_device
 
@@ -92,7 +92,7 @@ def run_fast_fixmatch():
     labeled_ds, unlabeled_ds = split_labeled_unlabeled(train_ds, num_classes, args.num_labeled)
     logger.info(f"Labeled class distribution: {class_counts(labeled_ds, num_classes)}")
 
-    norm_transform, weak_transform, strong_transform = build_transforms(mean, std)
+    norm_transform, weak_transform, strong_transform = build_transforms(mean, std, image_size(args.dataset))
     batch_size_l = 64
     max_u_batch = batch_size_l * args.mu
     labeled_loader, unlabeled_loader, test_loader, unlabeled_ds = build_loaders(

@@ -33,7 +33,7 @@ from torch.amp import autocast
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from common.args import add_common_args
-from common.data import build_loaders, build_transforms, class_counts, load_datasets, split_labeled_unlabeled
+from common.data import build_loaders, build_transforms, class_counts, image_size, load_datasets, split_labeled_unlabeled
 from common.recording import evaluate_and_log, new_metrics, results_path
 from common.setup import build_model_and_optimizer, enable_runtime_optimizations, select_device
 
@@ -71,7 +71,7 @@ def run_mixmatch():
     labeled_ds, unlabeled_ds = split_labeled_unlabeled(train_ds, num_classes, args.num_labeled)
     logger.info(f"Labeled class distribution: {class_counts(labeled_ds, num_classes)}")
 
-    norm_transform, weak_transform, _ = build_transforms(mean, std)
+    norm_transform, weak_transform, _ = build_transforms(mean, std, image_size(args.dataset))
     batch_size_l = 64
     labeled_loader, unlabeled_loader, test_loader, unlabeled_ds = build_loaders(
         labeled_ds, unlabeled_ds, test_ds, norm_transform, batch_size_l, MU, args.optimized)

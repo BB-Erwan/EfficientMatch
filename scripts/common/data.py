@@ -14,7 +14,7 @@ import os
 import torch
 import torchvision
 import torchvision.transforms as transforms
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import ConcatDataset, DataLoader, Subset
 from torchvision.transforms import v2
 
 from datasets_utils import TransformedDataset, TransformedDatasetWithIndex
@@ -24,7 +24,14 @@ DATASETS = {
     "cifar10": dict(num_classes=10, mean=(0.4914, 0.4822, 0.4465), std=(0.2470, 0.2435, 0.2616)),
     "cifar100": dict(num_classes=100, mean=(0.5071, 0.4865, 0.4409), std=(0.2673, 0.2564, 0.2762)),
     "svhn": dict(num_classes=10, mean=(0.4377, 0.4438, 0.4728), std=(0.1980, 0.2010, 0.1970)),
+    # STL-10: 96x96 images, statistics as in USB (Wang et al., 2022).
+    "stl10": dict(num_classes=10, mean=(0.4409, 0.4279, 0.3868), std=(0.2683, 0.2610, 0.2687), size=96),
 }
+
+
+def image_size(name):
+    """Side of the (square) images of a dataset: 32 for CIFAR and SVHN, 96 for STL-10."""
+    return DATASETS[name].get("size", 32)
 
 DATA_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data")
 
@@ -37,6 +44,12 @@ def load_datasets(name):
     if name == "cifar100":
         train = torchvision.datasets.CIFAR100(root=DATA_ROOT, train=True, download=True)
         test = torchvision.datasets.CIFAR100(root=DATA_ROOT, train=False, download=True)
+    elif name == "stl10":
+        # The 5000 labeled training images and the 100k unlabeled ones, whose label is -1: the labeled
+        # subset is drawn from the former, and everything else is unlabeled (see split_labeled_unlabeled).
+        train = ConcatDataset([torchvision.datasets.STL10(root=DATA_ROOT, split="train", download=True),
+                               torchvision.datasets.STL10(root=DATA_ROOT, split="unlabeled", download=True)])
+        test = torchvision.datasets.STL10(root=DATA_ROOT, split="test", download=True)
     elif name == "svhn":
         train = torchvision.datasets.SVHN(root=DATA_ROOT, split="train", download=True)
         test = torchvision.datasets.SVHN(root=DATA_ROOT, split="test", download=True)
@@ -54,12 +67,15 @@ def split_labeled_unlabeled(train_ds, num_classes, num_labeled):
     """
     train_ds = Subset(train_ds, torch.randperm(len(train_ds)))
     num_per_class = num_labeled // num_classes
+    labels = [label for _, label in train_ds]  # read once; the RNG is consumed exactly as before
     labeled_indices, unlabeled_indices = [], []
     for i in range(num_classes):
-        class_indices = [j for j, (_, label) in enumerate(train_ds) if label == i]
+        class_indices = [j for j, label in enumerate(labels) if label == i]
         perm = torch.randperm(len(class_indices))
         labeled_indices.extend([class_indices[j] for j in perm[:num_per_class]])
         unlabeled_indices.extend([class_indices[j] for j in perm[num_per_class:]])
+    # Samples without a label (label -1: STL-10's unlabeled split) are always unlabeled.
+    unlabeled_indices.extend([j for j, label in enumerate(labels) if label < 0])
     return Subset(train_ds, labeled_indices), Subset(train_ds, unlabeled_indices)
 
 
@@ -70,7 +86,7 @@ def class_counts(labeled_ds, num_classes):
     return counts
 
 
-def build_transforms(mean, std):
+def build_transforms(mean, std, size=32):
     """(normalise-only, weak, strong).
 
     Weak is the standard flip-and-crop; strong prepends RandAugment. Both are applied on the CPU to
@@ -80,12 +96,15 @@ def build_transforms(mean, std):
     Given a batch tensor, these v2 transforms draw their random parameters once for the whole batch:
     every image in it gets the same flip, the same crop and the same RandAugment operations. Every
     run of the paper was made this way, for every method alike.
+
+    `size` is the image side (see image_size); the crop padding is size/8, i.e. 4 px at 32 px.
     """
+    pad = size // 8
     norm = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean, std)])
     weak = v2.Compose([
         v2.ToImage(),
         v2.RandomHorizontalFlip(),
-        v2.RandomCrop(32, padding=4),
+        v2.RandomCrop(size, padding=pad),
         v2.ToDtype(torch.float32, scale=True),
         v2.Normalize(mean, std),
     ])
@@ -93,7 +112,7 @@ def build_transforms(mean, std):
         v2.RandAugment(num_ops=3, magnitude=5),
         v2.ToImage(),
         v2.RandomHorizontalFlip(),
-        v2.RandomCrop(32, padding=4),
+        v2.RandomCrop(size, padding=pad),
         v2.ToDtype(torch.float32, scale=True),
         v2.Normalize(mean, std),
     ])
