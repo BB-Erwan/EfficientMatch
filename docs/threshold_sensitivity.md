@@ -163,3 +163,27 @@ EfficientMatch is never ranked below second, in any configuration, at any horizo
 No other method has that property: MixMatch drops to fifth on CIFAR-10/250 at 120 min, and FixMatch,
 FlexMatch and RegMixMatch are never first. The target-based advantage of the main tables is
 therefore a statement about reaching high accuracy targets, not about accuracy at every budget.
+
+### Untruncated window
+
+The scores above hold a run's curve once it stops at its target. EfficientMatch is the first method to
+stop on all 12 configuration/seed pairs, so the holding mostly freezes EfficientMatch's curve. To get
+a score that holds no curve at all, `scripts/auc_untruncated_window.py` computes the mean accuracy over
+[0, H], where H is, per configuration and seed, the first point at which any method reaches its target
+(this is always EfficientMatch). Within [0, H], every curve is complete.
+
+Mean accuracy (%) over [0, H] of corrected time, mean of 3 seeds, with per-seed ranks
+(seeds 2312, 0308, 2701):
+
+| Config (H, min) | EfficientMatch | FixMatch | FlexMatch | MixMatch | RegMixMatch |
+|---|---|---|---|---|---|
+| SVHN/250 (5.7, 5.2, 6.3) | 55.6 [2,2,2] | 52.9 [3,3,3] | 8.8 [5,5,5] | **65.1** [1,1,1] | 32.3 [4,4,4] |
+| CIFAR-10/250 (29.6, 20.3, 17.9) | **65.9** [1,2,2] | 58.1 [3,4,4] | 59.2 [2,3,3] | 64.4 [4,1,1] | 54.1 [5,5,5] |
+| CIFAR-10/4000 (28.2, 29.3, 29.8) | 81.8 [2,2,2] | 78.6 [3,3,4] | 77.6 [5,4,3] | **84.5** [1,1,1] | 77.0 [4,5,5] |
+| CIFAR-100/2500 (55.1, 48.1, 58.0) | 37.1 [2,2,2] | 30.4 [5,4,5] | 30.5 [4,5,4] | **40.1** [1,1,1] | 35.8 [3,3,3] |
+
+Along FLOPs (H = 5–6, 18–31, 30–32 and 77–94 PFLOPs), MixMatch ranks first on every seed of every
+configuration, and EfficientMatch ranks second on 11 of 12 configuration/seed pairs (third on SVHN/250,
+seed 2701). Reading: MixMatch has the highest accuracy on average early in training; EfficientMatch
+is the first method to reach the high targets. H itself is set by EfficientMatch's target crossing,
+so the window depends on the targets, but no curve within it is held.

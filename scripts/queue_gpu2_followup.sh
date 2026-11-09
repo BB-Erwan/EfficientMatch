@@ -4,7 +4,8 @@
 # FixMatch run), stop that run right away, re-run Fast FixMatch seed 2312, run MixMatch with the
 # published L_x (--lx_target mixed) on CIFAR-10/250 and CIFAR-10/4000, seed 2312, run EfficientMatch
 # without the mask (--mix_mask none) on SVHN/250, CIFAR-10/4000 and CIFAR-100/2500 (3 seeds, seed-first),
-# then restart FixMatch.
+# run MixMatch and FlexMatch for a full 2-hour budget without target on CIFAR-10/250 seed 42 (threshold-free
+# comparison, with the existing full-horizon EfficientMatch/RegMixMatch runs), then restart FixMatch.
 set -u
 cd "$(dirname "$0")/.."
 source /c/Users/bertranh/anaconda3/etc/profile.d/conda.sh
@@ -38,6 +39,14 @@ for seed in 2312 308 2701; do
     timeout 130m python scripts/efficientmatch.py --dataset "$ds" --num_labeled "$nl" --seed "$seed"       --widen_factor "$wf" --target_acc "$tgt" --max_minutes 120 --mix_mask none > "logs/gpu2/${name}.log" 2>&1
     rc=$?; echo "$(date '+%F %T') end $name exit=$rc"
   done
+done
+for m in mixmatch flexmatch; do
+  out="results/cifar10-labeled-250-seed-42/${m}_ema_budget2h_metrics.json"
+  name="${m}_budget2h_seed42"
+  if [ -f "$out" ]; then echo "$(date '+%F %T') skip (exists) $name"; continue; fi
+  echo "$(date '+%F %T') start $name"
+  timeout 130m python "scripts/${m}.py" --dataset cifar10 --num_labeled 250 --seed 42 --max_minutes 120     --tag budget2h > "logs/gpu2/${name}.log" 2>&1
+  rc=$?; echo "$(date '+%F %T') end $name exit=$rc"
 done
 echo "$(date '+%F %T') start fixmatch_full_seed42"
 timeout 20h python scripts/fixmatch.py --dataset cifar10 --num_labeled 250 --seed 42 --tag unlimited \
