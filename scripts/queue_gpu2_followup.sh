@@ -2,7 +2,9 @@
 # Follow-up to queue_rebuttal_gpu2.sh: the full Fast FixMatch run of seed 2312 crashed on a Windows
 # file lock (fixed in common/recording.py). When the main queue reaches its last step (the 16-hour
 # FixMatch run), stop that run right away, re-run Fast FixMatch seed 2312, run MixMatch with the
-# published L_x (--lx_target mixed) on CIFAR-10/250 and CIFAR-10/4000, seed 2312, then restart FixMatch.
+# published L_x (--lx_target mixed) on CIFAR-10/250 and CIFAR-10/4000, seed 2312, run EfficientMatch
+# without the mask (--mix_mask none) on SVHN/250, CIFAR-10/4000 and CIFAR-100/2500 (3 seeds, seed-first),
+# then restart FixMatch.
 set -u
 cd "$(dirname "$0")/.."
 source /c/Users/bertranh/anaconda3/etc/profile.d/conda.sh
@@ -24,6 +26,18 @@ for nl in 250 4000; do
   echo "$(date '+%F %T') start mixmatch_lxmixed_${nl}_seed2312"
   timeout 130m python scripts/mixmatch.py --dataset cifar10 --num_labeled "$nl" --seed 2312     --target_acc "$tgt" --max_minutes 120 --lx_target mixed > "logs/gpu2/mixmatch_lxmixed_${nl}_seed2312.log" 2>&1
   rc=$?; echo "$(date '+%F %T') end mixmatch_lxmixed_${nl}_seed2312 exit=$rc"
+done
+for seed in 2312 308 2701; do
+  for cfg in "svhn 250 0.90 2" "cifar10 4000 0.90 2" "cifar100 2500 0.50 4"; do
+    set -- $cfg; ds=$1; nl=$2; tgt=$3; wf=$4
+    suffix=""; [ "$wf" != 2 ] && suffix="_wf${wf}"
+    out="results/${ds}-labeled-${nl}-seed-${seed}/efficientmatch_ema_mixmask_none${suffix}_metrics.json"
+    name="none_${ds}_${nl}_seed${seed}"
+    if [ -f "$out" ]; then echo "$(date '+%F %T') skip (exists) $name"; continue; fi
+    echo "$(date '+%F %T') start $name"
+    timeout 130m python scripts/efficientmatch.py --dataset "$ds" --num_labeled "$nl" --seed "$seed"       --widen_factor "$wf" --target_acc "$tgt" --max_minutes 120 --mix_mask none > "logs/gpu2/${name}.log" 2>&1
+    rc=$?; echo "$(date '+%F %T') end $name exit=$rc"
+  done
 done
 echo "$(date '+%F %T') start fixmatch_full_seed42"
 timeout 20h python scripts/fixmatch.py --dataset cifar10 --num_labeled 250 --seed 42 --tag unlimited \
