@@ -21,8 +21,9 @@ time on this pipeline. See docs/fast_fixmatch.md.
 --full adds the two other components of Fast FixMatch as defined by its authors (Algorithm 1 of
 Chen et al.): strong augmentation of the labeled batch (RandAugment here, AutoAugment in the paper)
 and FlexMatch's Curriculum Pseudo Labeling with the convex mapping, and scales the unlabeled loss
-weight with the current unlabeled batch (lambda = u_bs / max batch, so lambda = 1 at the full batch,
-as in FixMatch). Use it with --cbs_total_steps 1048576, the horizon of the paper (the whole run).
+weight with the current unlabeled batch. Chen et al. write lambda = u_bs / labeled batch
+(--lambda_ref labeled); the default --lambda_ref max uses u_bs / max batch (lambda = 1 at the full
+batch, as in FixMatch), which is 7x smaller and was our first reading. Use it with --cbs_total_steps 1048576, the horizon of the paper (the whole run).
 
 Because the point of this method is the compute it saves, it also records the FLOPs it actually
 spends, calibrated once on the real model rather than assumed.
@@ -62,6 +63,11 @@ parser.add_argument("--cbs_total_steps", type=int, default=60000,
 parser.add_argument("--full", type=str2bool, default=False,
                     help="Full Fast FixMatch: CBS + strong labeled augmentation + FlexMatch CPL + "
                          "lambda scaled with the unlabeled batch. Results get a '_full' suffix.")
+parser.add_argument("--lambda_ref", choices=["max", "labeled"], default="max",
+                    help="With --full, lambda = u_bs / reference. 'labeled' divides by the labeled batch "
+                         "(64), as written in Chen et al. (lambda = 96/64 = 1.5 for an unlabeled batch of 96; "
+                         "suffix '_lamlab'). 'max' divides by mu*64, so lambda = 1 at the full batch; it was "
+                         "the first version and is kept so existing results stay reproducible.")
 parser.add_argument("--compile", type=str2bool, default=True,
                     help="torch.compile the model. False runs in eager mode, where varying batch shapes "
                          "cost no recompilation; results then get an '_eager' suffix.")
@@ -119,6 +125,7 @@ def run_fast_fixmatch():
                    + ("_ema" if args.use_ema else "")
                    + ("_full" if args.full else "")
                    + (f"_cbs{args.cbs_total_steps}" if args.full and args.cbs_total_steps != 60000 else "")
+                   + ("_lamlab" if args.full and args.lambda_ref == "labeled" else "")
                    + ("" if args.compile else "_eager")
                    + (f"_wf{args.widen_factor}" if args.widen_factor != 2 else "")
                    + (f"_{args.tag}" if args.tag else ""))
@@ -198,7 +205,8 @@ def run_fast_fixmatch():
             loss_supervised = F.cross_entropy(all_logits[:n_l], y_l)
             loss_consistency = (mask * F.cross_entropy(all_logits[n_l:], pseudo, reduction="none")).mean()
             if args.full:
-                loss_consistency = loss_consistency * (u_bs / max_u_batch)
+                lambda_den = batch_size_l if args.lambda_ref == "labeled" else max_u_batch
+                loss_consistency = loss_consistency * (u_bs / lambda_den)
             loss = loss_supervised + loss_consistency
             losses.append(loss.item())
 
