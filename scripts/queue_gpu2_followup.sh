@@ -2,7 +2,8 @@
 # Follow-up to queue_rebuttal_gpu2.sh: the full Fast FixMatch run of seed 2312 crashed on a Windows
 # file lock (fixed in common/recording.py); its re-run was dropped after seed 308 stayed at 69.4% after the 2-hour
 # budget (it does not reach the target). When the main queue reaches its last step (the 16-hour
-# FixMatch run), stop that run right away, run MixMatch with the
+# FixMatch run), stop that run right away, run full Fast FixMatch with lambda = u_bs/64 as in the paper
+# (--lambda_ref labeled) on seed 308, run MixMatch with the
 # published L_x (--lx_target mixed) on CIFAR-10/250 and CIFAR-10/4000, seed 2312, run EfficientMatch
 # without the mask (--mix_mask none) on SVHN/250, CIFAR-10/4000 and CIFAR-100/2500 (3 seeds, seed-first),
 # run MixMatch and FlexMatch for a full 2-hour budget without target on CIFAR-10/250 seed 42 (threshold-free
@@ -16,6 +17,12 @@ powershell.exe -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object
 sleep 5
 partial="results/cifar10-labeled-250-seed-42/fixmatch_ema_unlimited_metrics.json"
 [ -f "$partial" ] && mv "$partial" "results/cifar10-labeled-250-seed-42/fixmatch_ema_unlimited_killed_metrics.json"
+out="results/cifar10-labeled-250-seed-308/fast_fixmatch_ema_full_cbs1048576_lamlab_eager_metrics.json"
+if [ -f "$out" ]; then echo "$(date '+%F %T') skip (exists) ffm_full_lamlab_seed308"; else
+  echo "$(date '+%F %T') start ffm_full_lamlab_seed308"
+  timeout 130m python scripts/fast_fixmatch.py --dataset cifar10 --num_labeled 250 --seed 308     --target_acc 0.80 --max_minutes 120 --full true --cbs_total_steps 1048576 --compile false     --lambda_ref labeled > logs/gpu2/ffm_full_lamlab_seed308.log 2>&1
+  rc=$?; echo "$(date '+%F %T') end ffm_full_lamlab_seed308 exit=$rc"
+fi
 for nl in 250 4000; do
   if [ "$nl" = 250 ]; then tgt=0.80; else tgt=0.90; fi
   out="results/cifar10-labeled-${nl}-seed-2312/mixmatch_ema_lxmixed_metrics.json"
