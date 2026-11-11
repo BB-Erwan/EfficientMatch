@@ -11,10 +11,12 @@ the labeled subset and the initial weights, and with them every number a run pro
 """
 import os
 
+import numpy as np
 import torch
 import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import ConcatDataset, DataLoader, Subset
+from PIL import Image
 from torchvision.transforms import v2
 
 from datasets_utils import TransformedDataset, TransformedDatasetWithIndex
@@ -36,6 +38,42 @@ def image_size(name):
 DATA_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data")
 
 
+class LazySTL10(torch.utils.data.Dataset):
+    """STL-10 split read through a memory map instead of being loaded into RAM.
+
+    torchvision's STL10 holds the images as one array (2.8 GB for the unlabeled split). On Windows,
+    DataLoader workers are spawned and receive a pickled copy of the dataset, which fails at that
+    size. This class pickles only the file path and opens the map lazily in each process. Images,
+    labels and their order are identical to torchvision.datasets.STL10 (checked image by image).
+    """
+
+    def __init__(self, root, split):
+        torchvision.datasets.STL10(root=root, split=split, download=True)  # download and verify only
+        base = os.path.join(root, "stl10_binary")
+        self.path = os.path.join(base, f"{split}_X.bin")
+        self.n = os.path.getsize(self.path) // (3 * 96 * 96)
+        y = os.path.join(base, f"{split}_y.bin")
+        if os.path.exists(y):
+            self.labels = (np.fromfile(y, dtype=np.uint8).astype(np.int64) - 1).tolist()
+        else:
+            self.labels = [-1] * self.n
+        self._data = None
+
+    def __len__(self):
+        return self.n
+
+    def __getitem__(self, i):
+        if self._data is None:
+            self._data = np.memmap(self.path, dtype=np.uint8, mode="r", shape=(self.n, 3, 96, 96))
+        # The binary is column-major: (3, 96, 96) stored as channel, column, row.
+        return Image.fromarray(np.ascontiguousarray(self._data[i].transpose(2, 1, 0))), self.labels[i]
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["_data"] = None
+        return state
+
+
 def load_datasets(name):
     """(num_classes, mean, std, train_ds, test_ds). Downloads into data/ at the repository root on
     first use, so the scripts can be launched from anywhere."""
@@ -47,9 +85,8 @@ def load_datasets(name):
     elif name == "stl10":
         # The 5000 labeled training images and the 100k unlabeled ones, whose label is -1: the labeled
         # subset is drawn from the former, and everything else is unlabeled (see split_labeled_unlabeled).
-        train = ConcatDataset([torchvision.datasets.STL10(root=DATA_ROOT, split="train", download=True),
-                               torchvision.datasets.STL10(root=DATA_ROOT, split="unlabeled", download=True)])
-        test = torchvision.datasets.STL10(root=DATA_ROOT, split="test", download=True)
+        train = ConcatDataset([LazySTL10(DATA_ROOT, "train"), LazySTL10(DATA_ROOT, "unlabeled")])
+        test = LazySTL10(DATA_ROOT, "test")
     elif name == "svhn":
         train = torchvision.datasets.SVHN(root=DATA_ROOT, split="train", download=True)
         test = torchvision.datasets.SVHN(root=DATA_ROOT, split="test", download=True)
