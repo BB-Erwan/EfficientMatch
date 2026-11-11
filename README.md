@@ -7,7 +7,7 @@
   <img alt="Runs: 118 reproducible" src="https://img.shields.io/badge/paper%20runs-118%2F118%20on%20disk-1f77b4">
 </p>
 
-Code and results for the paper, included here as [`paper.pdf`](paper.pdf).
+Code and results for the paper.
 
 Semi-supervised learning is usually evaluated on the accuracy a method eventually reaches, after a
 fixed budget of 2^20 iterations. This work asks the complementary question — **which method reaches

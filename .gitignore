@@ -197,3 +197,9 @@ paper/build/
 # Paper drafting stays local
 paper/
 rebuttal/
+
+# GPU queue scripts: local run orchestration, not needed to reproduce the results
+scripts/queue_*.sh
+
+# graphify knowledge-graph output (local)
+graphify-out/
