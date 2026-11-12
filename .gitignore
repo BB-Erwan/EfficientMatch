@@ -203,3 +203,6 @@ scripts/queue_*.sh
 
 # graphify knowledge-graph output (local)
 graphify-out/
+
+# Model checkpoints saved by --diagnostics (large, local)
+checkpoints/

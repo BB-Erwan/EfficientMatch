@@ -79,10 +79,26 @@ parser.add_argument("--mix_mask", type=str, default="partner",
                     help="Which confidence mask gates the Mixup loss. 'partner' "
                          "(default) is the method of the paper. Non-default values are written as "
                          "efficientmatch_*_mixmask_<value>.")
-parser.add_argument("--mix_input", type=str, default="mixup", choices=["mixup", "extra_strong"],
+parser.add_argument("--mix_input", type=str, default="mixup", choices=["mixup", "extra_strong", "extra_weak"],
                     help="'mixup' (default) mixes each pool sample with its partner. 'extra_strong' "
                          "replaces the mix by a fresh strong augmentation of the sample itself, with its "
-                         "own target (control). Non-default results are written as *_extrastrong.")
+                         "own target (control). 'extra_weak' does the same with a fresh weak augmentation, "
+                         "the kind of view Mixup mixes. Non-default results are written as *_extrastrong "
+                         "or *_extraweak.")
+parser.add_argument("--partner_class", type=str, default="any", choices=["any", "same", "different"],
+                    help="Only with --mix_mask none. 'same' pairs each pool sample with a partner of the same "
+                         "class (true label for labeled samples, pseudo-label for unlabeled ones), "
+                         "'different' with a partner of another class. Partners are then drawn with "
+                         "replacement; a sample with no valid partner is mixed with itself. Written as "
+                         "*_partners_<value>.")
+parser.add_argument("--partner_pool", type=str, default="all", choices=["all", "labeled", "unlabeled"],
+                    help="Only with --mix_mask none. Restrict partners to the labeled or to the unlabeled part "
+                         "of the pool (drawn with replacement). Written as *_pool_<value>.")
+parser.add_argument("--diagnostics", type=str2bool, default=False,
+                    help="Also record, at every evaluation, the coverage and precision of the stored "
+                         "pseudo-labels, their per-class recall, the precision of the admitted pseudo-labels "
+                         "and the accuracy of all weak-view pseudo-labels over the interval; and save the "
+                         "evaluated model at 5k, 10k and 20k iterations under checkpoints/. Written as *_diag.")
 parser.add_argument("--T", type=float, default=0.5, help="Sharpening temperature (unused at the defaults).")
 parser.add_argument("--adaptive_threshold", type=str2bool, default=False,
                     help="Replace the fixed tau with FlexMatch's per-class curriculum thresholding.")
@@ -140,6 +156,29 @@ def mixing_partners_and_weights(mix_mask, anchor_masks):
     raise ValueError(f"Unknown mix_mask: {mix_mask}")
 
 
+def constrained_partners(classes, n_l, partner_class, partner_pool):
+    """Partner index for every sample of the X + U_w pool under a class or pool constraint.
+
+    classes holds the true label of the n_l labeled samples followed by the pseudo-label of the
+    unlabeled ones. Each sample draws one partner uniformly among the allowed ones (with
+    replacement, never itself); a sample with no allowed partner is paired with itself.
+    """
+    n = classes.size(0)
+    idx = torch.arange(n, device=classes.device)
+    allowed = idx.view(-1, 1) != idx.view(1, -1)
+    if partner_class == "same":
+        allowed &= classes.view(-1, 1) == classes.view(1, -1)
+    elif partner_class == "different":
+        allowed &= classes.view(-1, 1) != classes.view(1, -1)
+    if partner_pool == "labeled":
+        allowed &= (idx < n_l).view(1, -1)
+    elif partner_pool == "unlabeled":
+        allowed &= (idx >= n_l).view(1, -1)
+    scores = torch.rand(n, n, device=classes.device).masked_fill(~allowed, -1.0)
+    best, partner = scores.max(dim=1)
+    return torch.where(best >= 0, partner, idx)
+
+
 def run_efficientmatch():
     enable_runtime_optimizations()
     device = select_device()
@@ -161,8 +200,11 @@ def run_efficientmatch():
     model, base_model, eval_model, ema, optimizer, scheduler = build_model_and_optimizer(
         args, num_classes, device)
 
-    if args.mix_input == "extra_strong" and args.mix_mask not in ("none", "anchor"):
-        raise ValueError("--mix_input extra_strong has no partner: use --mix_mask none or anchor.")
+    if args.mix_input != "mixup" and args.mix_mask not in ("none", "anchor"):
+        raise ValueError("--mix_input extra_strong/extra_weak has no partner: use --mix_mask none or anchor.")
+    constrained = args.partner_class != "any" or args.partner_pool != "all"
+    if constrained and (args.mix_mask != "none" or args.mix_input != "mixup"):
+        raise ValueError("--partner_class / --partner_pool require --mix_mask none and --mix_input mixup.")
     if args.adaptive_threshold and args.freematch_threshold:
         raise ValueError("--adaptive_threshold (FlexMatch) and --freematch_threshold are mutually exclusive.")
     variant = {"hard": "efficientmatch_hard", "soft": "efficientmatch_soft"}.get(args.mixing_target,
@@ -175,6 +217,10 @@ def run_efficientmatch():
                    + (f"_mixw{args.mixup_weight}" if args.mixup_weight != 1.0 else "")
                    + (f"_mixmask_{args.mix_mask}" if args.mix_mask != "partner" else "")
                    + ("_extrastrong" if args.mix_input == "extra_strong" else "")
+                   + ("_extraweak" if args.mix_input == "extra_weak" else "")
+                   + (f"_partners_{args.partner_class}" if args.partner_class != "any" else "")
+                   + (f"_pool_{args.partner_pool}" if args.partner_pool != "all" else "")
+                   + ("_diag" if args.diagnostics else "")
                    + (f"_wf{args.widen_factor}" if args.widen_factor != 2 else "")
                    + (f"_{args.tag}" if args.tag else ""))
     path = results_path(args, method_name)
@@ -193,6 +239,16 @@ def run_efficientmatch():
     confidences = torch.zeros(len(unlabeled_ds), dtype=torch.float32)
     pseudo_state = (pseudo_labels, confidences, pseudo_labels.clone(), confidences.clone(),
                     torch.tensor([label for _, label, _ in unlabeled_ds]))
+
+    diag_keys = ["pl_coverage", "pl_precision", "pl_class_recall", "admitted_precision", "weak_pl_acc"]
+    if args.diagnostics:
+        for key in diag_keys:
+            metrics[key] = []
+        # Running sums on the GPU (no per-step sync): admitted & correct, admitted, correct, seen.
+        diag_sums = torch.zeros(4, device=device)
+        ckpt_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "checkpoints",
+                                os.path.basename(os.path.dirname(path)))
+        os.makedirs(ckpt_dir, exist_ok=True)
 
     losses, mask_ratios = [], []
     start_time = time.time()
@@ -282,7 +338,12 @@ def run_efficientmatch():
             all_targets = torch.cat([one_hot_l, one_hot_u], dim=0)
             anchor_masks = torch.cat([torch.ones(n_l, device=device), mask], dim=0)
 
-            partner, mix_weights = mixing_partners_and_weights(args.mix_mask, anchor_masks)
+            if constrained:
+                partner = constrained_partners(torch.cat([y_l, pseudo]), n_l, args.partner_class,
+                                               args.partner_pool)
+                mix_weights = torch.ones_like(anchor_masks)
+            else:
+                partner, mix_weights = mixing_partners_and_weights(args.mix_mask, anchor_masks)
             all_inputs, all_targets = all_inputs[partner], all_targets[partner]
 
             # lambda >= 0.5 keeps the anchor dominant in the mix.
@@ -311,6 +372,17 @@ def run_efficientmatch():
                     extra_l, extra_u = strong_transform(x_l_raw).to(device), strong_transform(x_u).to(device)
                 mixup_x, mixup_u = extra_l, extra_u
                 mixup_targets_x, mixup_targets_u = one_hot_l, anchor_u
+            elif args.mix_input == "extra_weak":
+                # Same control with a fresh weak view: the kind of view the Mixup channel mixes.
+                if args.optimized:
+                    extra_l = weak_transform(x_l_raw).to(device, non_blocking=True,
+                                                         memory_format=torch.channels_last)
+                    extra_u = weak_transform(x_u).to(device, non_blocking=True,
+                                                     memory_format=torch.channels_last)
+                else:
+                    extra_l, extra_u = weak_transform(x_l_raw).to(device), weak_transform(x_u).to(device)
+                mixup_x, mixup_u = extra_l, extra_u
+                mixup_targets_x, mixup_targets_u = one_hot_l, anchor_u
 
             mixup_logits = model(torch.cat([mixup_x, mixup_u], dim=0))
             mixup_targets = torch.cat([mixup_targets_x, mixup_targets_u], dim=0)
@@ -335,12 +407,37 @@ def run_efficientmatch():
             ema.update(base_model)
 
         track_pseudo_labels(pseudo_labels, confidences, idx, mask, pseudo, max_prob)
+        if args.diagnostics:
+            with torch.no_grad():
+                correct = (pseudo == y_u.to(device, non_blocking=True)).float()
+                diag_sums += torch.stack([(mask * correct).sum(), mask.sum(), correct.sum(),
+                                          torch.tensor(float(correct.numel()), device=device)])
 
         if (step + 1) % args.test_period == 0 or step == 0 or step == args.max_steps - 1:
             if ema is not None:
                 ema.copy_to(eval_model)
+            extra = None
+            if args.diagnostics:
+                true_labels = pseudo_state[4]
+                stored = pseudo_labels != -1
+                good = pseudo_labels == true_labels
+                s = diag_sums.tolist()
+                extra = {
+                    "pl_coverage": stored.float().mean().item(),
+                    "pl_precision": (good[stored].float().mean().item() if stored.any() else 0.0),
+                    "pl_class_recall": [(good & (true_labels == c)).sum().item()
+                                        / max((true_labels == c).sum().item(), 1)
+                                        for c in range(num_classes)],
+                    "admitted_precision": s[0] / s[1] if s[1] > 0 else 0.0,
+                    "weak_pl_acc": s[2] / s[3] if s[3] > 0 else 0.0,
+                }
+                diag_sums.zero_()
             stop = evaluate_and_log(args, step, metrics, path, eval_model, test_loader, device,
-                                    start_time, losses, mask_ratios, pseudo_state)
+                                    start_time, losses, mask_ratios, pseudo_state, extra=extra)
+            if args.diagnostics and step + 1 in (5000, 10000, 20000):
+                torch.save(eval_model.state_dict(),
+                           os.path.join(ckpt_dir, f"{os.path.basename(path)[:-len('_metrics.json')]}"
+                                                  f"_step{step + 1}.pt"))
             losses, mask_ratios = [], []
             if stop:
                 break
