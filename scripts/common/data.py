@@ -28,7 +28,43 @@ DATASETS = {
     "svhn": dict(num_classes=10, mean=(0.4377, 0.4438, 0.4728), std=(0.1980, 0.2010, 0.1970)),
     # STL-10: 96x96 images, statistics as in USB (Wang et al., 2022).
     "stl10": dict(num_classes=10, mean=(0.4409, 0.4279, 0.3868), std=(0.2683, 0.2610, 0.2687), size=96),
+    # Tiny-ImageNet: 200 classes, 500 training and 50 validation images per class, 64x64 (native)
+    # or downsampled to 32x32. Statistics computed on the training set.
+    "tinyimagenet": dict(num_classes=200, mean=(0.4802, 0.4481, 0.3975), std=(0.2770, 0.2691, 0.2821), size=64),
+    "tinyimagenet32": dict(num_classes=200, mean=(0.4802, 0.4481, 0.3975), std=(0.2770, 0.2691, 0.2821), size=32),
 }
+
+
+class TinyImageNet(torch.utils.data.Dataset):
+    """Tiny-ImageNet train or val split (the test split has no labels), read from
+    data/tiny-imagenet-200 (http://cs231n.stanford.edu/tiny-imagenet-200.zip). Labels index the
+    sorted wnids. Images are loaded lazily from disk, optionally resized to `size`."""
+
+    def __init__(self, root, split, size=64):
+        base = os.path.join(root, "tiny-imagenet-200")
+        wnids = sorted(open(os.path.join(base, "wnids.txt")).read().split())
+        index = {w: i for i, w in enumerate(wnids)}
+        self.samples = []
+        if split == "train":
+            for w in wnids:
+                folder = os.path.join(base, "train", w, "images")
+                self.samples += [(os.path.join(folder, f), index[w]) for f in sorted(os.listdir(folder))]
+        else:
+            for line in open(os.path.join(base, "val", "val_annotations.txt")):
+                f, w = line.split("\t")[:2]
+                self.samples.append((os.path.join(base, "val", "images", f), index[w]))
+        self.labels = [label for _, label in self.samples]
+        self.size = size
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, i):
+        path, label = self.samples[i]
+        img = Image.open(path).convert("RGB")
+        if img.size != (self.size, self.size):
+            img = img.resize((self.size, self.size), Image.BICUBIC)
+        return img, label
 
 
 def image_size(name):
@@ -87,6 +123,9 @@ def load_datasets(name):
         # subset is drawn from the former, and everything else is unlabeled (see split_labeled_unlabeled).
         train = ConcatDataset([LazySTL10(DATA_ROOT, "train"), LazySTL10(DATA_ROOT, "unlabeled")])
         test = LazySTL10(DATA_ROOT, "test")
+    elif name.startswith("tinyimagenet"):
+        train = TinyImageNet(DATA_ROOT, "train", spec["size"])
+        test = TinyImageNet(DATA_ROOT, "val", spec["size"])
     elif name == "svhn":
         train = torchvision.datasets.SVHN(root=DATA_ROOT, split="train", download=True)
         test = torchvision.datasets.SVHN(root=DATA_ROOT, split="test", download=True)

@@ -21,7 +21,8 @@ def str2bool(v):
 def add_common_args(parser):
     """The 18 options every method accepts, with identical meaning and defaults."""
     data = parser.add_argument_group("data")
-    data.add_argument("--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100", "svhn", "stl10"])
+    data.add_argument("--dataset", type=str, default="cifar10", choices=["cifar10", "cifar100", "svhn", "stl10",
+                                                                              "tinyimagenet", "tinyimagenet32"])
     data.add_argument("--num_labeled", type=int, default=250,
                       help="Size of the labeled subset, split evenly across classes.")
     data.add_argument("--seed", type=int, default=42,
