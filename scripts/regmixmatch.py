@@ -219,6 +219,11 @@ def run_regmixmatch():
     path = results_path(args, method_name)
 
     metrics = new_metrics()
+    # Cumulative number of images in the ResizeMix forward pass. On the default (filtered) path it
+    # changes every iteration with the confident pool, so the FLOPs of a run are the fixed cost of
+    # the first pass per iteration plus the per-image cost times this count.
+    metrics["mixed_samples_cum"] = []
+    mixed_samples_cum = 0
     pseudo_labels = torch.full((len(unlabeled_ds),), -1, dtype=torch.long)
     confidences = torch.zeros(len(unlabeled_ds), dtype=torch.float32)
     pseudo_state = (pseudo_labels, confidences, pseudo_labels.clone(), confidences.clone(),
@@ -407,6 +412,7 @@ def run_regmixmatch():
                     uncert_weight = max_probs[~valid] ** 3
                     cam_loss = (F.mse_loss(F.softmax(logits_mix_uncert, dim=-1), mixed_y_sc, reduction="none").mean(dim=-1) * uncert_weight).mean()
 
+            mixed_samples_cum += int(mixed_x.shape[0]) + (0 if disab_cam else int(mixed_x_sc.shape[0]))
             ent_loss = entropy_loss(mask, logits_s, p_model, label_hist)
 
             srm_loss = lambda_u * unsup_loss + mix_loss
@@ -431,7 +437,8 @@ def run_regmixmatch():
             if ema is not None:
                 ema.copy_to(eval_model)
             stop = evaluate_and_log(args, step, metrics, path, eval_model, test_loader, device,
-                                    start_time, losses, mask_ratio, pseudo_state)
+                                    start_time, losses, mask_ratio, pseudo_state,
+                                    extra={"mixed_samples_cum": mixed_samples_cum})
             losses, mask_ratio = [], []
             if stop:
                 break
